@@ -1,0 +1,43 @@
+package com.ayun.model.dto;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+import java.util.List;
+
+/**
+ * 创建文章 DTO
+ */
+@Data
+@Schema(description = "创建文章参数")
+public class PostCreateDTO {
+
+    @NotBlank(message = "文章标题不能为空")
+    @Schema(description = "文章标题")
+    private String title;
+
+    @NotBlank(message = "文章内容不能为空")
+    @Schema(description = "文章内容")
+    private String content;
+
+    @Schema(description = "文章摘要")
+    private String excerpt;
+
+    @Schema(description = "文章封面图")
+    private String cover;
+
+    @NotNull(message = "分类不能为空")
+    @Schema(description = "分类ID")
+    private Integer categoryId;
+
+    @Schema(description = "文章状态: draft(草稿), published(发布)")
+    private String status = "draft";
+
+    @Schema(description = "是否置顶: 0(否), 1(是)")
+    private Integer isTop = 0;
+
+    @Schema(description = "标签ID列表")
+    private List<Integer> tagIds;
+}
