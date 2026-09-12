@@ -6,6 +6,13 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      // 编辑器为全屏工作台，不套站点顶栏
+      path: '/editor/:id?',
+      name: 'ArticleEditor',
+      component: () => import('../views/article/ArticleEditor.vue'),
+      meta: { requiresAuth: true, title: '编辑器' },
+    },
+    {
       path: '/',
       component: MainLayout,
       children: [
@@ -16,16 +23,16 @@ const router = createRouter({
           meta: { title: '首页' },
         },
         {
-          path: 'article/:id',
+          path: 'articles/:id',
           name: 'ArticleDetail',
           component: () => import('../views/article/ArticleDetail.vue'),
           meta: { title: '文章详情' },
         },
         {
-          path: 'editor/:id?',
-          name: 'ArticleEditor',
-          component: () => import('../views/article/ArticleEditor.vue'),
-          meta: { requiresAuth: true, title: '编辑器' },
+          path: 'search',
+          name: 'Search',
+          component: () => import('../views/search/SearchView.vue'),
+          meta: { title: '搜索' },
         },
         {
           path: 'publish-success',
@@ -74,7 +81,7 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach((to) => {
   // Set page title
   if (to.meta.title) {
     document.title = `${to.meta.title} - CloudLog`
@@ -86,9 +93,7 @@ router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
   const isLoggedIn = !!userStore.token
   if (to.meta.requiresAuth && !isLoggedIn) {
-    next('/login')
-  } else {
-    next()
+    return '/login'
   }
 })
 

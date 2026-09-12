@@ -1,36 +1,31 @@
 <template>
   <div class="about-view">
-    <!-- Hero Section -->
-    <div class="hero-section">
+    <header class="about-head">
       <el-avatar
-        :size="120"
+        :size="72"
         src="https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png"
-        class="avatar"
+        class="about-head__avatar"
       />
-      <h1 class="name">Ayun</h1>
-      <p class="tagline">Stay hungry, stay foolish.</p>
-      <div class="social-links">
-        <el-button circle
-          ><el-icon><i class="fab fa-github"></i></el-icon
-        ></el-button>
-        <el-button circle
-          ><el-icon><i class="fab fa-twitter"></i></el-icon
-        ></el-button>
-        <el-button circle
-          ><el-icon><i class="fab fa-weixin"></i></el-icon
-        ></el-button>
-        <el-button circle
-          ><el-icon><Message /></el-icon
-        ></el-button>
+      <div class="about-head__intro">
+        <h1 class="about-head__name">Ayun</h1>
+        <p class="about-head__tagline">Stay hungry, stay foolish.</p>
+        <p class="about-head__social tnum">
+          <span>GitHub</span>
+          <span aria-hidden="true">·</span>
+          <span>Twitter</span>
+          <span aria-hidden="true">·</span>
+          <span>微信</span>
+          <span aria-hidden="true">·</span>
+          <span>邮件</span>
+        </p>
       </div>
-    </div>
+    </header>
 
-    <el-row :gutter="40" class="about-content">
-      <!-- Left Column: Bio & Skills -->
-      <el-col :xs="24" :md="14">
-        <section class="bio-section">
-          <h2 class="section-title">👋 关于我</h2>
-          <div class="bio-text">
+    <div class="about-grid">
+      <div class="about-main">
+        <section class="about-section">
+          <h2 class="about-section__title">关于我</h2>
+          <div class="about-section__prose">
             <p>
               你好！我是
               Ayun，一名热衷于前端技术的开发工程师。我喜欢通过代码构建美丽且实用的用户界面，并在这个博客上分享我的学习心得和项目实践。
@@ -42,46 +37,38 @@
           </div>
         </section>
 
-        <section class="skills-section">
-          <h2 class="section-title">🛠️ 技术栈</h2>
-          <div class="skill-groups">
-            <div v-for="group in skillGroups" :key="group.title" class="skill-group">
-              <h3>{{ group.title }}</h3>
-              <div class="tags">
-                <el-tag v-for="skill in group.skills" :key="skill" effect="plain" round>
-                  {{ skill }}
-                </el-tag>
-              </div>
+        <section class="about-section">
+          <h2 class="about-section__title">技术栈</h2>
+          <dl class="skill-list">
+            <div v-for="group in skillGroups" :key="group.title" class="skill-list__group">
+              <dt>{{ group.title }}</dt>
+              <dd>{{ group.skills.join(' · ') }}</dd>
             </div>
-          </div>
+          </dl>
         </section>
-      </el-col>
+      </div>
 
-      <!-- Right Column: Timeline/Experience -->
-      <el-col :xs="24" :md="10">
-        <section class="experience-section">
-          <h2 class="section-title">🚀 经历</h2>
-          <el-timeline>
-            <el-timeline-item
-              v-for="(item, index) in experience"
-              :key="index"
-              :timestamp="item.date"
-              :type="index === 0 ? 'primary' : ''"
-              size="large"
-            >
-              <h4 class="exp-title">{{ item.title }}</h4>
-              <p class="exp-desc">{{ item.desc }}</p>
-            </el-timeline-item>
-          </el-timeline>
+      <aside class="about-aside">
+        <section class="about-section">
+          <h2 class="about-section__title">经历</h2>
+          <ol class="timeline">
+            <li v-for="(item, index) in experience" :key="index" class="timeline__item">
+              <p class="timeline__date tnum">{{ item.date }}</p>
+              <h3 class="timeline__title">{{ item.title }}</h3>
+              <p class="timeline__desc">{{ item.desc }}</p>
+            </li>
+          </ol>
         </section>
-      </el-col>
-    </el-row>
+      </aside>
+    </div>
+
+    <SiteFooter />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Message } from '@element-plus/icons-vue'
+import SiteFooter from '@/components/SiteFooter.vue'
 
 const skillGroups = ref([
   { title: 'Frontend', skills: ['Vue 3', 'React', 'TypeScript', 'Vite', 'Sass', 'Element Plus'] },
@@ -110,94 +97,144 @@ const experience = ref([
 </script>
 
 <style scoped lang="scss">
-@use '../styles/variables.scss' as *;
-
-.about-view {
-  padding-bottom: $spacing-xl * 2;
-}
-
-.hero-section {
-  text-align: center;
-  padding: $spacing-xl * 2 0;
-  margin-bottom: $spacing-xl * 2;
-  background: linear-gradient(to bottom, rgba($primary-color, 0.05), transparent);
-  border-radius: $border-radius-large;
-
-  .avatar {
-    border: 4px solid $white;
-    box-shadow: $box-shadow;
-    margin-bottom: $spacing-md;
-  }
-
-  .name {
-    font-size: 36px;
-    font-weight: 800;
-    margin: 0 0 $spacing-xs;
-  }
-
-  .tagline {
-    color: $text-secondary;
-    font-size: 18px;
-    margin-bottom: $spacing-lg;
-  }
-
-  .social-links {
-    display: flex;
-    justify-content: center;
-    gap: $spacing-md;
-    .el-button {
-      font-size: 20px;
-    }
-  }
-}
-
-.section-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin-bottom: $spacing-xl;
+.about-head {
   display: flex;
   align-items: center;
-  gap: $spacing-sm;
+  gap: var(--space-lg);
+  padding-bottom: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  border-bottom: 1px solid var(--color-rule);
+
+  &__avatar {
+    flex-shrink: 0;
+    border: 1px solid var(--color-rule);
+  }
+
+  &__name {
+    font-size: var(--text-xl);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  &__tagline {
+    margin-top: var(--space-2xs);
+    font-size: var(--text-base);
+    color: var(--color-ink-3);
+  }
+
+  &__social {
+    margin-top: var(--space-sm);
+    display: flex;
+    gap: var(--space-xs);
+    font-size: var(--text-xs);
+    color: var(--color-ink-4);
+  }
 }
 
-.bio-section {
-  margin-bottom: $spacing-xl * 2;
-  .bio-text {
-    font-size: 16px;
-    line-height: 1.8;
-    color: $text-regular;
-    p {
-      margin-bottom: $spacing-md;
+.about-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2xl);
+}
+
+.about-section {
+  & + .about-section {
+    margin-top: var(--space-2xl);
+  }
+
+  &__title {
+    font-size: var(--text-md);
+    margin-bottom: var(--space-md);
+  }
+
+  &__prose {
+    max-width: 65ch;
+    font-size: var(--text-base);
+    line-height: 1.85;
+    color: var(--color-ink-2);
+
+    p + p {
+      margin-top: var(--space-md);
     }
   }
 }
 
-.skills-section {
-  .skill-group {
-    margin-bottom: $spacing-lg;
-    h3 {
-      font-size: 16px;
-      color: $text-secondary;
-      margin-bottom: $spacing-sm;
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+
+  &__group {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    gap: var(--space-md);
+    align-items: baseline;
+
+    dt {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--color-ink-4);
     }
-    .tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: $spacing-sm;
+
+    dd {
+      font-size: var(--text-sm);
+      line-height: 1.8;
+      color: var(--color-ink-2);
     }
   }
 }
 
-.experience-section {
-  .exp-title {
-    font-size: 16px;
-    font-weight: 700;
-    margin: 0 0 4px;
+.timeline {
+  border-inline-start: 1px solid var(--color-rule);
+}
+
+.timeline__item {
+  position: relative;
+  padding-block: var(--space-xs);
+  padding-inline-start: var(--space-lg);
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: -0.1875rem;
+    top: 1.05rem;
+    width: 0.375rem;
+    height: 0.375rem;
+    background-color: var(--color-rule-strong);
+    border-radius: var(--radius-xs);
   }
-  .exp-desc {
-    font-size: 14px;
-    color: $text-secondary;
-    line-height: 1.6;
+
+  &:first-child::before {
+    background-color: var(--color-accent);
+  }
+
+  & + .timeline__item {
+    margin-top: var(--space-md);
+  }
+}
+
+.timeline__date {
+  font-size: var(--text-xs);
+  color: var(--color-ink-4);
+}
+
+.timeline__title {
+  margin-top: var(--space-3xs);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.timeline__desc {
+  margin-top: var(--space-3xs);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+@media (min-width: 60rem) {
+  .about-grid {
+    grid-template-columns: minmax(0, 1fr) 16rem;
   }
 }
 </style>

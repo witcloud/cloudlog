@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.List;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -33,6 +35,16 @@ public class ArticleController {
     @GetMapping
     public Result<PageResult<PostVO>> getArticles(PostQueryDTO queryDTO) {
         return Result.success(articleService.getArticles(queryDTO));
+    }
+
+    /**
+     * 获取热门文章
+     */
+    @Operation(summary = "获取热门文章")
+    @Parameter(name = "limit", description = "返回条数", example = "10")
+    @GetMapping("/hot")
+    public Result<List<PostVO>> getHotArticles(@RequestParam(defaultValue = "10") Integer limit) {
+        return Result.success(articleService.getHotArticles(limit));
     }
 
     /**

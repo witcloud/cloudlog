@@ -1,101 +1,96 @@
 <template>
-  <el-card class="author-card" shadow="never">
-    <div class="author-header">
-      <el-avatar :size="64" :src="formatMinioUrl(author.avatar || defaultAvatar)" />
-      <div class="author-info-text">
-        <h3 class="author-name">{{ author.username }}</h3>
-        <p class="author-title">前端开发工程师 / 博主</p>
+  <section class="author-card">
+    <div class="author-card__head">
+      <el-avatar :size="48" :src="formatMinioUrl(author.avatar || defaultAvatar)" />
+      <div class="author-card__intro">
+        <h3 class="author-card__name">{{ author.username }}</h3>
+        <p class="author-card__role">前端开发工程师 / 博主</p>
       </div>
     </div>
-    <p class="author-bio">专注于 Vue.js 和 TypeScript 领域，热衷于分享技术干货和开发心得。</p>
-    <div class="author-stats">
-      <div class="stat-item">
-        <span class="label">文章</span>
-        <span class="value">{{ stats.articles || 0 }}</span>
+    <p class="author-card__bio">专注于 Vue.js 和 TypeScript 领域，热衷于分享技术干货和开发心得。</p>
+    <dl class="author-card__stats">
+      <div class="author-card__stat">
+        <dt>文章</dt>
+        <dd class="tnum">{{ stats.articles ?? '—' }}</dd>
       </div>
-      <div class="stat-item">
-        <span class="label">获赞</span>
-        <span class="value">{{ stats.likes || 0 }}</span>
+      <div class="author-card__stat">
+        <dt>获赞</dt>
+        <dd class="tnum">{{ stats.likes ?? 0 }}</dd>
       </div>
-    </div>
-    <el-button type="primary" class="follow-btn" plain>关注作者</el-button>
-  </el-card>
+    </dl>
+    <el-button type="primary" plain class="author-card__follow">关注作者</el-button>
+  </section>
 </template>
 
 <script setup lang="ts">
 import type { Author } from '@/api/types/article'
 import { formatMinioUrl } from '@/config'
 
-const props = defineProps<{
+defineProps<{
   author: Author
   stats: {
     articles?: number
     likes?: number
   }
 }>()
-console.log('作者信息：', props.author)
-console.log('统计信息：', props.stats)
 
 const defaultAvatar = '/default-avatar.png'
 </script>
 
-<style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
-
+<style scoped>
 .author-card {
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
+  padding: var(--space-lg);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-paper-2);
+}
 
-  .author-header {
-    display: flex;
-    align-items: center;
-    gap: $spacing-md;
-    margin-bottom: $spacing-md;
+.author-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
 
-    .author-info-text {
-      .author-name {
-        margin: 0;
-        font-size: 18px;
-        font-weight: 700;
-      }
-      .author-title {
-        margin: 4px 0 0;
-        font-size: 13px;
-        color: $text-secondary;
-      }
-    }
-  }
+.author-card__name {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-ink);
+}
 
-  .author-bio {
-    font-size: 14px;
-    color: $text-regular;
-    line-height: 1.6;
-    margin: 0 0 $spacing-md;
-  }
+.author-card__role {
+  margin-top: var(--space-3xs);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
 
-  .author-stats {
-    display: flex;
-    gap: $spacing-xl;
-    padding: $spacing-md 0;
-    border-top: 1px solid rgba($border-color, 0.5);
-    margin-bottom: $spacing-md;
+.author-card__bio {
+  margin-top: var(--space-md);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
 
-    .stat-item {
-      display: flex;
-      flex-direction: column;
-      .label {
-        font-size: 12px;
-        color: $text-secondary;
-      }
-      .value {
-        font-weight: 700;
-        font-size: 16px;
-      }
-    }
-  }
+.author-card__stats {
+  display: flex;
+  gap: var(--space-xl);
+  margin-top: var(--space-md);
+  padding-block: var(--space-md);
+  border-top: 1px solid var(--color-rule);
+}
 
-  .follow-btn {
-    width: 100%;
-  }
+.author-card__stat dt {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.author-card__stat dd {
+  margin-top: var(--space-3xs);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.author-card__follow {
+  width: 100%;
 }
 </style>

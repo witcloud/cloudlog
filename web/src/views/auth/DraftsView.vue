@@ -282,25 +282,23 @@ const confirmDelete = (id: number) => {
 </script>
 
 <style scoped lang="scss">
-@use '../../styles/variables.scss' as *;
-
 .drafts-view {
-  padding-bottom: $spacing-xl;
+  padding-bottom: var(--space-xl);
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: $spacing-xl;
+  margin-bottom: var(--space-xl);
 
   .page-title {
     font-size: 32px;
     font-weight: 800;
-    margin: 0 0 $spacing-xs;
+    margin: 0 0 var(--space-2xs);
   }
   .page-subtitle {
-    color: $text-secondary;
+    color: var(--color-ink-3);
     font-size: 14px;
     margin: 0;
   }
@@ -310,8 +308,8 @@ const confirmDelete = (id: number) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: $spacing-xl;
-  gap: $spacing-md;
+  margin-bottom: var(--space-xl);
+  gap: var(--space-md);
   flex-wrap: wrap;
 
   .search-input {
@@ -321,7 +319,7 @@ const confirmDelete = (id: number) => {
   .filter-group {
     display: flex;
     align-items: center;
-    gap: $spacing-sm;
+    gap: var(--space-xs);
   }
 }
 
@@ -332,18 +330,18 @@ const confirmDelete = (id: number) => {
 .draft-list {
   display: flex;
   flex-direction: column;
-  gap: $spacing-md;
+  gap: var(--space-md);
 }
 
 .draft-card {
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
-  transition: all 0.3s;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
+  transition: border-color var(--dur-short) var(--ease-out);
 
   &:hover {
-    border-color: $primary-color;
+    border-color: var(--color-accent);
     .draft-title {
-      color: $primary-color;
+      color: var(--color-accent);
     }
   }
 
@@ -356,13 +354,13 @@ const confirmDelete = (id: number) => {
   .draft-info {
     display: flex;
     align-items: center;
-    gap: $spacing-lg;
+    gap: var(--space-lg);
     flex: 1;
 
     .draft-cover {
       width: 120px;
       height: 80px;
-      border-radius: $border-radius-base;
+      border-radius: var(--radius-sm);
       overflow: hidden;
       cursor: pointer;
       flex-shrink: 0;
@@ -380,11 +378,11 @@ const confirmDelete = (id: number) => {
       .image-placeholder {
         width: 100%;
         height: 100%;
-        background-color: $bg-color;
+        background-color: var(--color-paper);
         display: flex;
         justify-content: center;
         align-items: center;
-        color: $text-placeholder;
+        color: var(--color-ink-4);
         font-size: 24px;
       }
     }
@@ -394,13 +392,13 @@ const confirmDelete = (id: number) => {
     .draft-title {
       font-size: 18px;
       font-weight: 600;
-      margin: 0 0 $spacing-sm;
+      margin: 0 0 var(--space-xs);
       cursor: pointer;
       transition: color 0.3s;
     }
     .draft-meta {
       font-size: 13px;
-      color: $text-secondary;
+      color: var(--color-ink-3);
       display: flex;
       align-items: center;
       gap: 4px;
@@ -415,12 +413,12 @@ const confirmDelete = (id: number) => {
 
   .draft-actions {
     display: flex;
-    gap: $spacing-md;
+    gap: var(--space-md);
   }
 }
 
 .pagination {
-  margin-top: $spacing-xl;
+  margin-top: var(--space-xl);
   display: flex;
   justify-content: center;
 }

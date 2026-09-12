@@ -75,6 +75,17 @@ public class ArticleService {
     }
 
     /**
+     * 获取热门文章（按阅读量倒序）
+     * @param limit 返回条数
+     * @return 文章 VO 列表
+     */
+    public List<PostVO> getHotArticles(Integer limit) {
+        PageHelper.startPage(1, limit == null || limit <= 0 ? 10 : limit);
+        List<Post> list = postMapper.findAll(null, null, null, "hottest");
+        return postConverter.toVOList(list);
+    }
+
+    /**
      * 根据 ID 获取文章详情
      * @param id 文章 ID
      * @return 文章 VO

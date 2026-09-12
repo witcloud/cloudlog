@@ -1,27 +1,27 @@
-import { defineStore } from 'pinia';
-import { ref } from 'vue';
-import type { UserInfo } from '@/api/types/auth';
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import type { UserInfo } from '@/api/types/auth'
 
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('token') || '');
-  const userInfo = ref<UserInfo | null>(JSON.parse(localStorage.getItem('userInfo') || 'null'));
+  const token = ref(localStorage.getItem('token') || '')
+  const userInfo = ref<UserInfo | null>(JSON.parse(localStorage.getItem('userInfo') || 'null'))
 
   const setToken = (newToken: string) => {
-    token.value = newToken;
-    localStorage.setItem('token', newToken);
-  };
+    token.value = newToken
+    localStorage.setItem('token', newToken)
+  }
 
   const setUserInfo = (info: UserInfo) => {
-    userInfo.value = info;
-    localStorage.setItem('userInfo', JSON.stringify(info));
-  };
+    userInfo.value = info
+    localStorage.setItem('userInfo', JSON.stringify(info))
+  }
 
   const logout = () => {
-    token.value = '';
-    userInfo.value = null;
-    localStorage.removeItem('token');
-    localStorage.removeItem('userInfo');
-  };
+    token.value = ''
+    userInfo.value = null
+    localStorage.removeItem('token')
+    localStorage.removeItem('userInfo')
+  }
 
   return {
     token,
@@ -29,5 +29,5 @@ export const useUserStore = defineStore('user', () => {
     setToken,
     setUserInfo,
     logout,
-  };
-});
+  }
+})

@@ -1,10 +1,25 @@
 <!doctype html>
-<html lang="">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite App</title>
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="CloudLog — 一个关于前端技术的个人博客，记录学习心得与项目实践。"
+    />
+    <title>CloudLog</title>
+    <script>
+      // 首帧前落定主题，避免暗色闪白（与 useTheme.ts 的存储键保持一致）
+      try {
+        var stored = localStorage.getItem('cloudlog-theme')
+        var dark =
+          stored === 'dark' ||
+          (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

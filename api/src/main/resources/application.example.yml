@@ -1,21 +1,26 @@
+# ============================================================
+# CloudLog 后端配置模板
+# 复制本文件为 application.yml 并填入真实值（application.yml 不会被提交）
+# ============================================================
+
 spring:
   application:
-    name: AyunBlog-Springboot3
+    name: CloudLog
   datasource:
-    url: jdbc:mysql://localhost:3306/ayun_blog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
-    password: 123456
+    password: your_mysql_password
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
       host: localhost
       port: 6379
-      password: 123456
+      password: your_redis_password
       database: 0
   mail:
     host: smtp.qq.com
-    username: 2196065579@qq.com
-    password: tpieflwninjadjab
+    username: your_email@qq.com
+    password: your_smtp_authorization_code
     port: 587
     protocol: smtp
     default-encoding: UTF-8
@@ -48,7 +53,7 @@ pagehelper:
 
 # JWT Configuration
 jwt:
-  secret: ayun_blog_secret_key_for_jwt_token_generation_at_least_32_chars
+  secret: your_jwt_secret_key_at_least_32_characters_long
   expiration: 604800 # 7 days in seconds
   header: Authorization
   prefix: "Bearer "

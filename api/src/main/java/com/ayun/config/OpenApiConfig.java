@@ -21,11 +21,11 @@ public class OpenApiConfig {
      * @return OpenAPI 对象
      */
     @Bean
-    public OpenAPI ayunBlogOpenAPI() {
+    public OpenAPI cloudLogOpenAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("AyunBlog 接口文档")
-                        .description("基于 Spring Boot 3 构建的 AyunBlog 系统 RESTful 接口文档")
+                        .title("CloudLog 接口文档")
+                        .description("基于 Spring Boot 3 构建的 CloudLog 系统 RESTful 接口文档")
                         .version("v1.1")
                         .contact(new Contact().name("Ayun").email("contact@ayun.com"))
                         .license(new License().name("Apache 2.0").url("http://springdoc.org")))

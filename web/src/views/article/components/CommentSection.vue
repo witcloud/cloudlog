@@ -1,37 +1,38 @@
 <template>
-  <el-card class="comments-card" shadow="never">
-    <template #header>
-      <div class="card-header">
-        <span>评论 ({{ commentCount }})</span>
-      </div>
-    </template>
-    <div class="comment-input">
-      <el-input v-model="newComment" type="textarea" :rows="3" placeholder="说点什么吧..." />
-      <div class="input-actions">
+  <section class="comments">
+    <header class="comments__head">
+      <h2 class="comments__title">评论</h2>
+      <span class="comments__count tnum">{{ commentCount }}</span>
+    </header>
+
+    <div class="comments__input">
+      <el-input v-model="newComment" type="textarea" :rows="3" placeholder="说点什么吧…" />
+      <div class="comments__actions">
         <el-button type="primary" @click="handleSubmit">提交评论</el-button>
       </div>
     </div>
-    <div class="comment-list">
-      <div v-for="comment in comments" :key="comment.id" class="comment-item">
-        <el-avatar :size="40" :src="formatMinioUrl(comment.avatar)" />
-        <div class="comment-body">
-          <div class="comment-header">
-            <span class="comment-user">{{ comment.user }}</span>
-            <span class="comment-time">{{ comment.time }}</span>
+
+    <ul class="comments__list">
+      <li v-for="comment in comments" :key="comment.id" class="comments__item">
+        <el-avatar :size="36" :src="formatMinioUrl(comment.avatar)" />
+        <div class="comments__body">
+          <div class="comments__meta">
+            <span class="comments__user">{{ comment.user }}</span>
+            <span class="comments__time tnum">{{ comment.time }}</span>
           </div>
-          <div class="comment-text">{{ comment.text }}</div>
+          <p class="comments__text">{{ comment.text }}</p>
         </div>
-      </div>
-      <el-empty v-if="comments.length === 0" description="暂无评论" />
-    </div>
-  </el-card>
+      </li>
+    </ul>
+    <p v-if="comments.length === 0" class="comments__empty">还没有评论，来发表第一条吧。</p>
+  </section>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { formatMinioUrl } from '@/config'
 
-const props = defineProps<{
+defineProps<{
   commentCount: number
 }>()
 
@@ -73,53 +74,86 @@ const handleSubmit = () => {
 }
 </script>
 
-<style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+<style scoped>
+.comments {
+  margin-top: var(--space-2xl);
+}
 
-.comments-card {
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
+.comments__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-rule);
+}
 
-  .comment-input {
-    margin-bottom: $spacing-xl;
-    .input-actions {
-      margin-top: $spacing-sm;
-      display: flex;
-      justify-content: flex-end;
-    }
-  }
+.comments__title {
+  font-size: var(--text-md);
+}
 
-  .comment-list {
-    display: flex;
-    flex-direction: column;
-    gap: $spacing-lg;
+.comments__count {
+  font-size: var(--text-xs);
+  color: var(--color-ink-4);
+}
 
-    .comment-item {
-      display: flex;
-      gap: $spacing-md;
+.comments__input {
+  margin-top: var(--space-lg);
+}
 
-      .comment-body {
-        flex: 1;
-        .comment-header {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 4px;
-          .comment-user {
-            font-weight: 700;
-            font-size: 14px;
-          }
-          .comment-time {
-            font-size: 12px;
-            color: $text-secondary;
-          }
-        }
-        .comment-text {
-          font-size: 14px;
-          line-height: 1.6;
-          color: $text-regular;
-        }
-      }
-    }
-  }
+.comments__actions {
+  margin-top: var(--space-sm);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.comments__list {
+  margin-top: var(--space-xl);
+}
+
+.comments__item {
+  display: flex;
+  gap: var(--space-md);
+  padding-block: var(--space-md);
+}
+
+.comments__item + .comments__item {
+  border-top: 1px solid var(--color-rule);
+}
+
+.comments__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comments__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.comments__user {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.comments__time {
+  font-size: var(--text-xs);
+  color: var(--color-ink-4);
+}
+
+.comments__text {
+  margin-top: var(--space-3xs);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+
+.comments__empty {
+  padding-block: var(--space-lg);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-ink-4);
 }
 </style>

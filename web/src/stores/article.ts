@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
-import type { Article, Category, Tag } from '@/api/types/article'
+import type { Article } from '@/api/types/article'
 import { getArticleDetail } from '@/api/article'
 
 export const useArticleStore = defineStore('article', () => {

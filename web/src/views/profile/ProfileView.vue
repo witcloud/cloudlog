@@ -38,7 +38,7 @@
             <div class="article-list">
               <div v-for="article in myArticles" :key="article.id" class="my-article-item">
                 <div class="article-main">
-                  <h3 class="article-title" @click="$router.push(`/article/${article.id}`)">
+                  <h3 class="article-title" @click="$router.push(`/articles/${article.id}`)">
                     {{ article.title }}
                   </h3>
                   <div class="article-meta">
@@ -291,43 +291,41 @@ const handleDelete = (id: number) => {
 </script>
 
 <style scoped lang="scss">
-@use '../../styles/variables.scss' as *;
-
 .profile-view {
-  padding-bottom: $spacing-xl;
+  padding-bottom: var(--space-xl);
 }
 
 .profile-card {
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
   text-align: center;
-  padding: $spacing-lg 0;
+  padding: var(--space-lg) 0;
 
   .user-info {
-    margin-bottom: $spacing-xl;
+    margin-bottom: var(--space-xl);
     .username {
-      margin: $spacing-md 0 $spacing-xs;
+      margin: var(--space-md) 0 var(--space-2xs);
       font-size: 24px;
       font-weight: 700;
     }
     .email {
-      color: $text-secondary;
+      color: var(--color-ink-3);
       font-size: 14px;
-      margin-bottom: $spacing-md;
+      margin-bottom: var(--space-md);
     }
     .bio {
-      color: $text-regular;
+      color: var(--color-ink-2);
       font-size: 14px;
-      margin-bottom: $spacing-lg;
-      padding: 0 $spacing-lg;
+      margin-bottom: var(--space-lg);
+      padding: 0 var(--space-lg);
     }
   }
 
   .user-stats {
     display: flex;
     justify-content: space-around;
-    padding-top: $spacing-xl;
-    border-top: 1px solid rgba($border-color, 0.5);
+    padding-top: var(--space-xl);
+    border-top: 1px solid rgba(var(--color-rule), 0.5);
 
     .stat-item {
       display: flex;
@@ -338,17 +336,17 @@ const handleDelete = (id: number) => {
       }
       .label {
         font-size: 12px;
-        color: $text-secondary;
+        color: var(--color-ink-3);
       }
     }
   }
 }
 
 .profile-tabs {
-  background-color: $white;
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
-  padding: $spacing-lg;
+  background-color: var(--color-paper-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
+  padding: var(--space-lg);
   min-height: 500px;
 }
 
@@ -356,8 +354,8 @@ const handleDelete = (id: number) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: $spacing-md 0;
-  border-bottom: 1px solid rgba($border-color, 0.5);
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid rgba(var(--color-rule), 0.5);
 
   &:last-child {
     border-bottom: none;
@@ -365,49 +363,49 @@ const handleDelete = (id: number) => {
 
   .article-main {
     .article-title {
-      margin: 0 0 $spacing-xs;
+      margin: 0 0 var(--space-2xs);
       font-size: 18px;
       cursor: pointer;
       transition: color 0.3s;
       &:hover {
-        color: $primary-color;
+        color: var(--color-accent);
       }
     }
     .article-meta {
       font-size: 13px;
-      color: $text-secondary;
+      color: var(--color-ink-3);
     }
   }
 
   .article-actions {
     display: flex;
-    gap: $spacing-md;
+    gap: var(--space-md);
   }
 }
 
 .settings-form {
   max-width: 500px;
-  margin-top: $spacing-md;
+  margin-top: var(--space-md);
 }
 
 .edit-profile-content {
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
+  gap: var(--space-lg);
 
   .avatar-edit-section {
-    padding: $spacing-md 0;
-    border-bottom: 1px solid rgba($border-color, 0.5);
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid rgba(var(--color-rule), 0.5);
   }
 
   .edit-form {
-    padding: 0 $spacing-sm;
+    padding: 0 var(--space-xs);
   }
 }
 
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
-  gap: $spacing-md;
+  gap: var(--space-md);
 }
 </style>

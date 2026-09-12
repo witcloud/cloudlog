@@ -1,23 +1,19 @@
 <template>
   <div class="toc-sidebar">
-    <el-card class="toc-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>文章目录</span>
-        </div>
-      </template>
-      <div class="toc-content">
-        <div 
-          v-for="item in tocItems" 
-          :key="item.id" 
-          :class="['toc-item', { active: activeId === item.id, sub: item.level > 1 }]"
+    <section class="toc-panel">
+      <p class="toc-panel__label">目录</p>
+      <div class="toc-panel__content">
+        <button
+          v-for="item in tocItems"
+          :key="item.id"
+          :class="['toc-item', { 'is-active': activeId === item.id, 'is-sub': item.level > 1 }]"
           @click="scrollTo(item.id)"
         >
           {{ item.text }}
-        </div>
-        <el-empty v-if="tocItems.length === 0" :image-size="40" description="暂无目录" />
+        </button>
+        <p v-if="tocItems.length === 0" class="toc-panel__empty">暂无目录</p>
       </div>
-    </el-card>
+    </section>
   </div>
 </template>
 
@@ -30,8 +26,6 @@ interface TocItem {
   level: number
 }
 
-// In a real application, you would extract headings from the markdown content
-// For now, we'll use some placeholder items or allow passing them in
 defineProps<{
   tocItems: TocItem[]
 }>()
@@ -47,53 +41,66 @@ const scrollTo = (id: string) => {
 }
 </script>
 
-<style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
-
+<style scoped>
 .toc-sidebar {
   position: sticky;
-  top: 84px;
+  top: calc(var(--header-h) + var(--space-lg));
+}
 
-  .toc-card {
-    border-radius: $border-radius-large;
-    border: 1px solid $border-color;
+.toc-panel {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-paper-2);
+  padding: var(--space-md);
+}
 
-    .toc-content {
-      max-height: calc(100vh - 200px);
-      overflow-y: auto;
+.toc-panel__label {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  color: var(--color-ink-4);
+  margin-bottom: var(--space-sm);
+}
 
-      .toc-item {
-        font-size: 14px;
-        padding: 8px 0;
-        color: $text-regular;
-        cursor: pointer;
-        transition: all 0.3s;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+.toc-panel__content {
+  max-height: calc(100vh - 14rem);
+  overflow-y: auto;
+}
 
-        &:hover {
-          color: $primary-color;
-          padding-left: 4px;
-        }
+.toc-item {
+  display: block;
+  width: 100%;
+  text-align: start;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  padding-block: var(--space-3xs);
+  color: var(--color-ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-inline-start: 2px solid transparent;
+  transition:
+    color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
 
-        &.active {
-          color: $primary-color;
-          font-weight: 700;
-          border-left: 2px solid $primary-color;
-          padding-left: 8px;
-        }
+.toc-item:hover {
+  color: var(--color-ink);
+}
 
-        &.sub {
-          padding-left: 16px;
-          font-size: 13px;
-          color: $text-secondary;
-          &:hover {
-            padding-left: 20px;
-          }
-        }
-      }
-    }
-  }
+.toc-item.is-active {
+  color: var(--color-accent);
+  border-inline-start-color: var(--color-accent);
+}
+
+.toc-item.is-sub {
+  padding-inline-start: var(--space-md);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.toc-panel__empty {
+  font-size: var(--text-sm);
+  color: var(--color-ink-4);
 }
 </style>

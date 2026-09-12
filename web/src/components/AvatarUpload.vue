@@ -11,7 +11,7 @@
       <div
         class="avatar-wrapper"
         v-loading="loading"
-        element-loading-background="rgba(0, 0, 0, 0.3)"
+        element-loading-background="var(--color-overlay)"
       >
         <el-avatar :size="size" :src="modelValue || defaultAvatar" class="avatar-image" />
         <div class="avatar-mask">
@@ -110,14 +110,12 @@ const handleUpload = async (options: UploadRequestOptions) => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
-
 .avatar-upload-container {
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: $spacing-sm;
+  gap: var(--space-xs);
 }
 
 .avatar-uploader {
@@ -154,12 +152,12 @@ const handleUpload = async (options: UploadRequestOptions) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--color-overlay);
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  color: #fff;
+  color: var(--color-paper);
   opacity: 0;
   transition: opacity 0.3s;
   font-size: 12px;

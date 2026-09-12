@@ -42,6 +42,7 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // 无状态会话
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/auth/**").permitAll() // 认证接口开放
+                .requestMatchers("/error").permitAll() // 错误转发路径，否则 404/500 会被兜底成 403
                 .requestMatchers(HttpMethod.GET, "/articles/**", "/categories/**", "/tags/**").permitAll() // 文章相关 GET 请求开放
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll() // Swagger 文档开放
                 .requestMatchers("/actuator/**").permitAll() // 监控端点开放

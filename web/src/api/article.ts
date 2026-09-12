@@ -4,7 +4,6 @@ import type {
   Article,
   ArticleListParams,
   ArticleListResponse,
-  Category,
   Tag,
   DraftListParams,
   PostVO,

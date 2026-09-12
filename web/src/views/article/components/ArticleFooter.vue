@@ -1,43 +1,31 @@
 <template>
   <footer class="article-footer">
-    <div class="share-actions">
-      <span class="share-label">分享到：</span>
-      <el-button-group>
-        <el-tooltip content="分享到微博" placement="top">
-          <el-button circle @click="shareTo('weibo')">
-            <el-icon><Share /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="微信扫码分享" placement="top">
-          <el-button circle @click="shareTo('wechat')">
-            <el-icon><ChatDotRound /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="分享到 Twitter" placement="top">
-          <el-button circle @click="shareTo('twitter')">
-            <el-icon><Position /></el-icon>
-          </el-button>
-        </el-tooltip>
-      </el-button-group>
+    <div class="article-footer__share">
+      <span class="article-footer__label">分享</span>
+      <button class="article-footer__share-link" @click="shareTo('weibo')">微博</button>
+      <span aria-hidden="true">·</span>
+      <button class="article-footer__share-link" @click="shareTo('wechat')">微信</button>
+      <span aria-hidden="true">·</span>
+      <button class="article-footer__share-link" @click="shareTo('twitter')">Twitter</button>
     </div>
 
-    <div class="article-copyright">
+    <div class="article-footer__copyright">
       <p>本文作者：{{ authorName }}</p>
       <p>
-        本文链接：<el-link type="primary" :href="articleLink" target="_blank">{{
+        本文链接：<a class="article-footer__link" :href="articleLink" target="_blank">{{
           articleLink
-        }}</el-link>
+        }}</a>
       </p>
       <p>
         版权声明：本博客所有文章除特别声明外，均采用
-        <el-link
-          type="primary"
+        <a
+          class="article-footer__link"
           href="https://creativecommons.org/licenses/by-nc-sa/4.0/"
           target="_blank"
         >
           CC BY-NC-SA 4.0
-        </el-link>
-        许可协议。转载请注明来自 AyunBlog！
+        </a>
+        许可协议。转载请注明来自 CloudLog。
       </p>
     </div>
 
@@ -55,7 +43,6 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Share, ChatDotRound, Position } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   authorName: string
@@ -86,44 +73,68 @@ const shareTo = (platform: string) => {
 }
 </script>
 
-<style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
-
+<style scoped>
 .article-footer {
-  margin-top: $spacing-xl;
-  padding-top: $spacing-lg;
-  border-top: 1px dashed $border-color;
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-rule);
+}
 
-  .share-actions {
-    display: flex;
-    align-items: center;
-    gap: $spacing-md;
-    margin-bottom: $spacing-xl;
+.article-footer__share {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
 
-    .share-label {
-      font-size: 14px;
-      color: $text-secondary;
-    }
-  }
+.article-footer__label {
+  font-size: var(--text-xs);
+  color: var(--color-ink-4);
+  margin-right: var(--space-2xs);
+}
 
-  .article-copyright {
-    background-color: $bg-color;
-    padding: $spacing-md;
-    border-left: 4px solid $primary-color;
-    font-size: 14px;
-    color: $text-regular;
-    p {
-      margin: $spacing-xs 0;
-    }
-  }
+.article-footer__share-link {
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  white-space: nowrap;
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.article-footer__share-link:hover {
+  color: var(--color-accent);
+}
+
+.article-footer__copyright {
+  margin-top: var(--space-lg);
+  padding: var(--space-md);
+  background-color: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  color: var(--color-ink-2);
+}
+
+.article-footer__copyright p + p {
+  margin-top: var(--space-3xs);
+}
+
+.article-footer__link {
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+}
+
+.article-footer__link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
 }
 
 .wechat-qr {
   text-align: center;
-  p {
-    font-size: 12px;
-    color: $text-secondary;
-    margin-top: $spacing-sm;
-  }
+}
+
+.wechat-qr p {
+  margin-top: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
 }
 </style>

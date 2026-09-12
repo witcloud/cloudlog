@@ -6,9 +6,10 @@ export interface UserProfile {
   avatar: string
   bio: string
   email?: string
-  articlesCount: number
-  likesCount: number
-  followersCount: number
+  // 展示用统计字段，接口不保证返回
+  articlesCount?: number
+  likesCount?: number
+  followersCount?: number
 }
 
 export interface EditUserProfile {

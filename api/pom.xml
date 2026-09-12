@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.ayun</groupId>
-    <artifactId>AyunBlog-Springboot3</artifactId>
+    <artifactId>CloudLog</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>AyunBlog-Springboot3</name>
-    <description>AyunBlog-Springboot3</description>
+    <name>CloudLog</name>
+    <description>CloudLog 博客系统后端</description>
     <url/>
     <licenses>
         <license/>

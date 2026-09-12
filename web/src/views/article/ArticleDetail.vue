@@ -3,40 +3,45 @@
     <el-skeleton :rows="10" animated />
   </div>
   <div v-else-if="article" class="article-detail">
-    <el-row :gutter="24">
-      <el-col :xs="24" :sm="24" :md="18" :offset="isAdmin ? 0 : 3" class="main-col">
-        <el-card class="detail-card" shadow="never">
-          <ArticleHeader :article="article" :can-edit="canEdit" @edit="handleEdit" />
+    <div class="article-detail__main">
+      <ArticleHeader :article="article" :can-edit="canEdit" @edit="handleEdit" />
 
-          <div class="article-content">
-            <md-preview :model-value="article.content" />
-          </div>
+      <div class="article-detail__content">
+        <md-preview
+                :model-value="article.content"
+                :theme="isDark ? 'dark' : 'light'"
+                code-theme="one-dark"
+              />
+      </div>
 
-          <ArticleFooter :author-name="article.author.username" :article-title="article.title" />
-        </el-card>
+      <ArticleFooter :author-name="article.author.username" :article-title="article.title" />
 
-        <CommentSection :comment-count="article.comments" />
-      </el-col>
+      <CommentSection :comment-count="article.comments" />
+    </div>
 
-      <el-col :xs="0" :sm="0" :md="6">
-        <div class="sidebar-wrapper">
-          <AuthorCard :author="article.author" :stats="{ articles: 42, likes: article.likes }" />
-          <TocSidebar :toc-items="tocItems" />
-        </div>
-      </el-col>
-    </el-row>
+    <aside class="article-detail__aside">
+      <div class="article-detail__aside-sticky">
+        <AuthorCard :author="article.author" :stats="{ likes: article.likes }" />
+        <TocSidebar :toc-items="tocItems" />
+      </div>
+    </aside>
   </div>
-  <el-empty v-else description="文章不存在" />
+  <div v-else class="article-missing">
+    <p class="article-missing__title">文章不存在。</p>
+    <p class="article-missing__hint">它可能已被删除，或链接有误。</p>
+    <RouterLink to="/" class="article-missing__action">返回首页</RouterLink>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import { useSEO } from '@/utils/seo'
 import { useArticleStore } from '@/stores/article'
 import { useUserStore } from '@/stores/user'
+import { useTheme } from '@/composables/useTheme'
 import { storeToRefs } from 'pinia'
 
 // Components
@@ -51,6 +56,7 @@ const router = useRouter()
 const { updateMeta } = useSEO()
 const articleStore = useArticleStore()
 const userStore = useUserStore()
+const { isDark } = useTheme()
 const { currentArticle: article, loading } = storeToRefs(articleStore)
 
 // 权限控制：管理员可编辑所有，普通用户只能编辑自己的文章
@@ -65,13 +71,13 @@ const canEdit = computed(() => {
 const tocItems = computed(() => {
   if (!article.value?.content) return []
 
-  const headings: any[] = []
+  const headings: { id: string; text: string; level: number }[] = []
   const reg = /^(#+)\s+(.+)$/gm
   let match
 
   while ((match = reg.exec(article.value.content)) !== null) {
-    const level = match[1].length
-    const text = match[2]
+    const level = (match[1] ?? '').length
+    const text = match[2] ?? ''
     // Simple ID generation from text
     const id = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
     headings.push({ id, text, level })
@@ -110,50 +116,77 @@ const handleEdit = () => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
-
 .article-detail {
-  padding-bottom: $spacing-xl;
-  max-width: 1200px;
-  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2xl);
+  align-items: start;
 }
 
 .loading-container {
-  padding: $spacing-xl;
-  background: #fff;
-  border-radius: $border-radius-large;
+  padding: var(--space-xl);
+  background-color: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
 }
 
-.detail-card {
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
-  margin-bottom: $spacing-lg;
-  transition: box-shadow 0.3s ease;
-
-  &:hover {
-    box-shadow: $box-shadow-light;
-  }
-
-  .article-content {
-    padding: 0 $spacing-sm;
-    line-height: 1.8;
-    color: $text-regular;
-
-    :deep(.md-editor-preview) {
-      font-size: 16px;
-    }
-  }
+.article-detail__main {
+  min-width: 0;
 }
 
-.sidebar-wrapper {
+.article-detail__content {
+  line-height: 1.85;
+  color: var(--color-ink-2);
+}
+
+.article-detail__aside {
+  display: none;
+}
+
+.article-missing {
+  padding: var(--space-2xl) 0;
+  text-align: center;
+}
+
+.article-missing__title {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--color-ink);
+}
+
+.article-missing__hint {
+  margin-top: var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--color-ink-3);
+}
+
+.article-missing__action {
+  display: inline-block;
+  margin-top: var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.article-missing__action:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.article-detail__aside-sticky {
+  position: sticky;
+  top: calc(var(--header-h) + var(--space-lg));
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
+  gap: var(--space-lg);
 }
 
-@media (max-width: 768px) {
-  .main-col {
-    offset: 0 !important;
+@media (min-width: 60rem) {
+  .article-detail {
+    grid-template-columns: minmax(0, 1fr) 15rem;
+  }
+
+  .article-detail__aside {
+    display: block;
   }
 }
 </style>

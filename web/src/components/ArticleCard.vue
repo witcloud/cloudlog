@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Article } from '@/api/types/article'
 import { useRouter } from 'vue-router'
-import { Calendar, View, Star, ChatLineRound, User } from '@element-plus/icons-vue'
+import { computed } from 'vue'
 import dayjs from 'dayjs'
 import { formatMinioUrl } from '@/config'
 
@@ -12,168 +12,142 @@ const props = defineProps<{
 const router = useRouter()
 
 const goToDetail = () => {
-  router.push(`/article/${props.article.id}`)
+  router.push(`/articles/${props.article.id}`)
 }
 
-const formatDate = (date: string) => {
-  return dayjs(date).format('YYYY-MM-DD HH:mm')
+const goToCategory = () => {
+  if (props.article.category?.name) {
+    router.push({ path: '/', query: { category: props.article.category.name } })
+  }
 }
+
+const formatDate = computed(() => dayjs(props.article.publishedAt).format('YYYY-MM-DD'))
+
+/** 阅读时长按正文约 400 字/分估算，无正文时退回摘要 */
+const readingTime = computed(() => {
+  const text = props.article.content || props.article.excerpt || ''
+  const minutes = Math.max(1, Math.round(text.replace(/\s/g, '').length / 400))
+  return `约 ${minutes} 分钟`
+})
+
+const coverUrl = computed(() => formatMinioUrl(props.article.cover))
 </script>
 
 <template>
-  <el-card class="article-card" shadow="hover" @click="goToDetail">
-    <div class="article-content">
-      <div class="article-info">
-        <h2 class="title">
-          {{ article.title }}
-        </h2>
-        <p class="excerpt">{{ article.excerpt }}</p>
-
-        <div class="meta">
-          <div class="meta-left">
-            <span class="author">
-              <el-avatar :size="20" :src="formatMinioUrl(article.author.avatar)">
-                <el-icon><User /></el-icon>
-              </el-avatar>
-              {{ article.author.username }}
-            </span>
-            <span class="stat"> | </span>
-            <span class="stat">
-              <el-icon><View /></el-icon>
-              {{ article.views }}
-            </span>
-            <span class="stat">
-              <el-icon><Star /></el-icon>
-              {{ article.likes }}
-            </span>
-          </div>
-          <div class="meta-right">
-            <div v-if="article.tags && article.tags.length > 0" class="tags">
-              <el-tag
-                v-for="tag in article.tags"
-                :key="tag.id"
-                size="small"
-                type="info"
-                effect="plain"
-                class="tag"
-              >
-                {{ tag.name }}
-              </el-tag>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div v-if="article.cover" class="article-cover">
-        <el-image :src="formatMinioUrl(article.cover)" fit="cover" />
-      </div>
+  <article class="article-card" @click="goToDetail">
+    <div class="article-card__body">
+      <div v-if="article.isTop" class="article-card__pin">置顶</div>
+      <h2 class="article-card__title">{{ article.title }}</h2>
+      <p class="article-card__excerpt">{{ article.excerpt }}</p>
+      <p class="article-card__meta tnum">
+        <button
+          v-if="article.category?.name"
+          class="article-card__category"
+          @click.stop="goToCategory"
+        >
+          {{ article.category.name }}
+        </button>
+        <span aria-hidden="true">·</span>
+        <time :datetime="article.publishedAt">{{ formatDate }}</time>
+        <span aria-hidden="true">·</span>
+        <span>{{ readingTime }}</span>
+      </p>
     </div>
-  </el-card>
+
+    <img
+      v-if="article.cover"
+      class="article-card__cover"
+      :src="coverUrl"
+      :alt="article.title"
+      width="108"
+      height="76"
+      loading="lazy"
+    />
+  </article>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
 .article-card {
+  display: flex;
+  gap: var(--space-lg);
+  align-items: flex-start;
+  padding-block: var(--space-lg);
   cursor: pointer;
-  transition: all 0.3s;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
-
-  .article-content {
-    display: flex;
-    gap: 20px;
-
-    .article-cover {
-      width: 108px;
-      height: 72px;
-      flex-shrink: 0;
-      border-radius: 4px;
-      overflow: hidden;
-
-      .el-image {
-        width: 100%;
-        height: 100%;
-        transition: transform 0.5s;
-      }
-    }
-    &:hover .article-cover .el-image {
-      transform: scale(1.1);
-    }
-
-    .article-info {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-
-      .title {
-        margin: 0 0 4px 0;
-        font-size: 16px;
-        color: var(--el-text-color-primary);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-
-        &:hover {
-          color: var(--el-color-primary);
-        }
-      }
-
-      .excerpt {
-        font-size: 13px;
-        color: var(--el-text-color-regular);
-        margin: 0 0 8px 0;
-        line-height: 1.6;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-      }
-
-      .meta {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 13px;
-        color: var(--el-text-color-secondary);
-
-        .meta-left,
-        .meta-right {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-        }
-
-        .author {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-        }
-
-        .tags {
-          display: flex;
-          gap: 5px;
-          flex-wrap: wrap;
-        }
-
-        .stat {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-      }
-    }
-  }
 }
 
-@media (max-width: 768px) {
-  .article-content {
-    flex-direction: column;
+.article-card__body {
+  flex: 1;
+  min-width: 0;
+}
 
-    .article-cover {
-      width: 100% !important;
-      height: 180px !important;
-    }
+.article-card__pin {
+  display: inline-block;
+  margin-bottom: var(--space-2xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+}
+
+.article-card__title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--color-ink);
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.article-card:hover .article-card__title {
+  color: var(--color-accent);
+}
+
+.article-card__excerpt {
+  margin-top: var(--space-2xs);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.article-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.article-card__category {
+  font-size: var(--text-xs);
+  font-family: inherit;
+  color: var(--color-ink-3);
+  white-space: nowrap;
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.article-card__category:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.article-card__cover {
+  width: 108px;
+  height: 76px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 40rem) {
+  .article-card__cover {
+    width: 84px;
+    height: 64px;
   }
 }
 </style>

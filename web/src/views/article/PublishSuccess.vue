@@ -37,7 +37,7 @@ const handleBackEdit = () => {
 
 const handleViewArticle = () => {
   if (articleId.value) {
-    router.push(`/article/${articleId.value}`)
+    router.push(`/articles/${articleId.value}`)
   } else {
     router.push('/')
   }
@@ -49,51 +49,49 @@ const handleGoHome = () => {
 </script>
 
 <style scoped lang="scss">
-@use '../../styles/variables.scss' as *;
-
 .publish-success-container {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: calc(100vh - 200px);
-  padding: $spacing-md;
+  padding: var(--space-md);
 }
 
 .success-card {
   width: 100%;
   max-width: 500px;
-  border-radius: $border-radius-large;
+  border-radius: var(--radius-md);
   text-align: center;
-  padding: $spacing-xl 0;
+  padding: var(--space-xl) 0;
 }
 
 .success-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: $spacing-lg;
+  gap: var(--space-lg);
 
   .success-icon {
     font-size: 72px;
-    color: $success-color;
+    color: var(--el-color-success);
   }
 
   .success-title {
     margin: 0;
     font-size: 28px;
-    color: $text-primary;
+    color: var(--color-ink);
   }
 
   .success-desc {
     margin: 0;
     font-size: 16px;
-    color: $text-secondary;
+    color: var(--color-ink-3);
   }
 
   .action-buttons {
     display: flex;
-    gap: $spacing-md;
-    margin-top: $spacing-lg;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
   }
 }
 
@@ -101,7 +99,7 @@ const handleGoHome = () => {
   .action-buttons {
     flex-direction: column;
     width: 100%;
-    padding: 0 $spacing-xl;
+    padding: 0 var(--space-xl);
 
     .el-button {
       margin-left: 0 !important;

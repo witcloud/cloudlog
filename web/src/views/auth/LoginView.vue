@@ -1,29 +1,22 @@
 <template>
   <div class="auth-view">
-    <el-card class="auth-card" shadow="never">
-      <div class="auth-header">
-        <el-icon class="logo-icon"><IceTea /></el-icon>
-        <h2>{{ isLogin ? '欢迎回来' : '加入我们' }}</h2>
-        <p>{{ isLogin ? '登录您的 AyunBlog 账号' : '创建一个新账号以开始写作' }}</p>
-      </div>
+    <div class="auth-panel">
+      <header class="auth-head">
+        <h1 class="auth-head__title">{{ isLogin ? '欢迎回来' : '加入我们' }}</h1>
+        <p class="auth-head__sub">
+          {{ isLogin ? '登录您的 CloudLog 账号' : '创建一个新账号以开始写作' }}
+        </p>
+      </header>
 
       <el-form :model="authForm" :rules="rules" ref="authFormRef" label-position="top">
         <template v-if="!isLogin">
           <el-form-item label="用户名" prop="username">
-            <el-input v-model="authForm.username" placeholder="请输入用户名">
-              <template #prefix>
-                <el-icon><User /></el-icon>
-              </template>
-            </el-input>
+            <el-input v-model="authForm.username" placeholder="请输入用户名" />
           </el-form-item>
         </template>
 
         <el-form-item label="邮箱" prop="email">
-          <el-input v-model="authForm.email" placeholder="your@email.com">
-            <template #prefix>
-              <el-icon><Message /></el-icon>
-            </template>
-          </el-input>
+          <el-input v-model="authForm.email" placeholder="your@email.com" />
         </el-form-item>
 
         <el-form-item label="密码" prop="password">
@@ -32,21 +25,13 @@
             type="password"
             placeholder="请输入密码"
             show-password
-          >
-            <template #prefix>
-              <el-icon><Lock /></el-icon>
-            </template>
-          </el-input>
+          />
         </el-form-item>
 
         <template v-if="!isLogin">
           <el-form-item label="验证码" prop="code">
             <div class="code-input">
-              <el-input v-model="authForm.code" placeholder="请输入 6 位验证码">
-                <template #prefix>
-                  <el-icon><ChatLineRound /></el-icon>
-                </template>
-              </el-input>
+              <el-input v-model="authForm.code" placeholder="请输入 6 位验证码" />
               <el-button
                 type="primary"
                 plain
@@ -54,30 +39,24 @@
                 @click="handleSendCode"
                 :loading="sendCodeLoading"
               >
-                {{ countdown > 0 ? `${countdown}s 后重新发送` : '发送验证码' }}
+                {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
               </el-button>
             </div>
           </el-form-item>
-        </template>
 
-        <template v-if="!isLogin">
           <el-form-item label="确认密码" prop="confirmPassword">
             <el-input
               v-model="authForm.confirmPassword"
               type="password"
               placeholder="请再次输入密码"
               show-password
-            >
-              <template #prefix>
-                <el-icon><Lock /></el-icon>
-              </template>
-            </el-input>
+            />
           </el-form-item>
         </template>
 
         <div v-if="isLogin" class="form-footer">
           <el-checkbox v-model="authForm.remember">记住我</el-checkbox>
-          <el-link type="primary" :underline="false">忘记密码？</el-link>
+          <el-link type="primary" underline="never">忘记密码？</el-link>
         </div>
 
         <el-button type="primary" class="submit-btn" :loading="loading" @click="handleSubmit">
@@ -85,13 +64,13 @@
         </el-button>
       </el-form>
 
-      <div class="auth-footer">
+      <footer class="auth-foot">
         <span>{{ isLogin ? '还没有账号？' : '已有账号？' }}</span>
-        <el-link type="primary" :underline="false" @click="toggleMode">
+        <button class="auth-foot__switch" @click="toggleMode">
           {{ isLogin ? '立即注册' : '立即登录' }}
-        </el-link>
-      </div>
-    </el-card>
+        </button>
+      </footer>
+    </div>
   </div>
 </template>
 
@@ -100,7 +79,6 @@ import { ref, reactive, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
-import { User, Message, Lock, IceTea, ChatLineRound } from '@element-plus/icons-vue'
 import { sendCode, register, login as loginApi } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 
@@ -116,14 +94,14 @@ const isLogin = computed(() => route.name === 'Login')
 
 const authForm = reactive({
   username: '',
-  email: '2144431549@qq.com',
+  email: '',
   password: '',
   confirmPassword: '',
   code: '',
   remember: false,
 })
 
-const validatePass2 = (rule: any, value: any, callback: any) => {
+const validatePass2 = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value === '') {
     callback(new Error('请再次输入密码'))
   } else if (value !== authForm.password) {
@@ -175,7 +153,7 @@ const handleSendCode = async () => {
         clearInterval(timer)
       }
     }, 1000)
-  } catch (error) {
+  } catch {
     // Error handled by interceptor
   } finally {
     sendCodeLoading.value = false
@@ -209,7 +187,7 @@ const handleSubmit = async () => {
           return
         }
         router.push('/')
-      } catch (error) {
+      } catch {
         // Error handled by interceptor
       } finally {
         loading.value = false
@@ -228,77 +206,75 @@ const toggleMode = () => {
 </script>
 
 <style scoped lang="scss">
-@use '../../styles/variables.scss' as *;
-
 .auth-view {
-  min-height: calc(100vh - 200px);
   display: flex;
-  align-items: center;
   justify-content: center;
-  padding: $spacing-xl 0;
+  padding-block: var(--space-xl);
 }
 
-.auth-card {
+.auth-panel {
   width: 100%;
-  max-width: 450px;
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
-  padding: $spacing-lg;
+  max-width: 24rem;
+}
 
-  .auth-header {
-    text-align: center;
-    margin-bottom: $spacing-xl;
+.auth-head {
+  margin-bottom: var(--space-xl);
 
-    .logo-icon {
-      font-size: 48px;
-      color: $primary-color;
-      margin-bottom: $spacing-md;
-    }
-
-    h2 {
-      margin: 0 0 $spacing-xs;
-      font-size: 24px;
-      font-weight: 700;
-    }
-
-    p {
-      color: $text-secondary;
-      font-size: 14px;
-      margin: 0;
-    }
+  &__title {
+    font-size: var(--text-lg);
   }
 
-  .form-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: $spacing-lg;
+  &__sub {
+    margin-top: var(--space-2xs);
+    font-size: var(--text-sm);
+    color: var(--color-ink-3);
+  }
+}
+
+.code-input {
+  display: flex;
+  gap: var(--space-sm);
+
+  .el-input {
+    flex: 1;
   }
 
-  .code-input {
-    display: flex;
-    gap: $spacing-md;
+  .el-button {
+    width: 7.5rem;
+    flex-shrink: 0;
+  }
+}
 
-    .el-input {
-      flex: 1;
+.form-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-lg);
+}
+
+.submit-btn {
+  width: 100%;
+  height: 2.75rem;
+  margin-top: var(--space-sm);
+}
+
+.auth-foot {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-rule);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-ink-3);
+
+  &__switch {
+    margin-left: var(--space-2xs);
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+
+    &:hover {
+      text-decoration: underline;
+      text-underline-offset: 0.25em;
     }
-
-    .el-button {
-      width: 120px;
-    }
-  }
-
-  .submit-btn {
-    width: 100%;
-    height: 42px;
-    font-size: 16px;
-    margin-bottom: $spacing-xl;
-  }
-
-  .auth-footer {
-    text-align: center;
-    font-size: 14px;
-    color: $text-regular;
   }
 }
 </style>

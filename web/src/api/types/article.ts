@@ -1,4 +1,6 @@
-export type { Category } from './category'
+import type { Category } from './category'
+
+export type { Category }
 
 export interface Author {
   id: number
@@ -25,6 +27,10 @@ export interface Article {
   likes: number
   comments: number
   isTop: number
+  // 编辑器回显字段，详情接口不保证返回，读取方均有回退逻辑
+  categoryId?: number
+  status?: string
+  publishTime?: string | null
 }
 
 export interface HotArticle {

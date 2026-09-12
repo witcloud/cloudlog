@@ -1,30 +1,28 @@
 <template>
   <header class="article-header">
-    <h1 class="article-title">{{ article.title }}</h1>
-    <div class="article-meta">
-      <span class="meta-item">
-        <el-icon><Calendar /></el-icon> 发布于 {{ formatDate(article.publishedAt) }}
-      </span>
-      <span class="meta-item">
-        <el-icon><User /></el-icon> {{ article.author.username }}
-      </span>
-      <span class="meta-item">
-        <el-icon><View /></el-icon> {{ article.views }} 次阅读
-      </span>
-      <el-button v-if="canEdit" type="primary" link @click="$emit('edit')">
-        <el-icon><Edit /></el-icon> 编辑
-      </el-button>
+    <h1 class="article-header__title">{{ article.title }}</h1>
+    <div class="article-header__meta tnum">
+      <span>发布于 {{ formatDate(article.publishedAt) }}</span>
+      <span aria-hidden="true">·</span>
+      <span>{{ article.author.username }}</span>
+      <span aria-hidden="true">·</span>
+      <span>{{ article.views }} 次阅读</span>
+      <button v-if="canEdit" class="article-header__edit" @click="$emit('edit')">编辑</button>
     </div>
-    <div class="article-tags">
-      <el-tag v-for="tag in article.tags" :key="tag.id" size="small" class="tag">
-        {{ tag.name }}
-      </el-tag>
+    <div v-if="article.tags?.length" class="article-header__tags tnum">
+      <RouterLink
+        v-for="tag in article.tags"
+        :key="tag.id"
+        class="article-header__tag"
+        :to="{ path: '/', query: { tagId: tag.id } }"
+      >
+        #{{ tag.name }}
+      </RouterLink>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { Calendar, User, View, Edit } from '@element-plus/icons-vue'
 import type { Article } from '@/api/types/article'
 import dayjs from 'dayjs'
 
@@ -36,51 +34,65 @@ defineProps<{
 defineEmits(['edit'])
 
 const formatDate = (date: string) => {
-  return dayjs(date).format('YYYY-MM-DD HH:mm')
+  return dayjs(date).format('YYYY-MM-DD')
 }
 </script>
 
-<style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
-
+<style scoped>
 .article-header {
-  text-align: center;
-  padding-bottom: $spacing-xl;
-  border-bottom: 1px solid rgba($border-color, 0.5);
-  margin-bottom: $spacing-xl;
-
-  .article-title {
-    font-size: 32px;
-    font-weight: 800;
-    margin-bottom: $spacing-lg;
-    color: $text-primary;
-  }
-
-  .article-meta {
-    display: flex;
-    justify-content: center;
-    gap: $spacing-lg;
-    color: $text-secondary;
-    font-size: 14px;
-    margin-bottom: $spacing-md;
-
-    .meta-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-  }
-
-  .article-tags {
-    display: flex;
-    justify-content: center;
-    gap: $spacing-sm;
-  }
+  padding-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--color-rule);
+  margin-bottom: var(--space-xl);
 }
 
-@media (max-width: 768px) {
-  .article-header .article-title {
-    font-size: 24px;
+.article-header__title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.article-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.article-header__edit {
+  margin-left: var(--space-2xs);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+}
+
+.article-header__edit:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.article-header__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.article-header__tag {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.article-header__tag:hover {
+  color: var(--color-accent);
+}
+
+@media (max-width: 40rem) {
+  .article-header__title {
+    font-size: var(--text-lg);
   }
 }
 </style>

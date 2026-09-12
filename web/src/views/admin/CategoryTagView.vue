@@ -16,7 +16,9 @@
             <el-table-column label="操作" width="150">
               <template #default="scope">
                 <el-button size="small" @click="editCategory(scope.row)">编辑</el-button>
-                <el-button size="small" type="danger" @click="deleteCategory(scope.row)">删除</el-button>
+                <el-button size="small" type="danger" @click="deleteCategory(scope.row)"
+                  >删除</el-button
+                >
               </template>
             </el-table-column>
           </el-table>
@@ -48,7 +50,10 @@
     </el-row>
 
     <!-- Dialogs -->
-    <el-dialog v-model="categoryDialog.visible" :title="categoryDialog.isEdit ? '编辑分类' : '新增分类'">
+    <el-dialog
+      v-model="categoryDialog.visible"
+      :title="categoryDialog.isEdit ? '编辑分类' : '新增分类'"
+    >
       <el-form :model="categoryDialog.form">
         <el-form-item label="分类名称">
           <el-input v-model="categoryDialog.form.name" />
@@ -63,85 +68,83 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
-import { ElMessageBox, ElMessage } from 'element-plus';
+import { ref, reactive } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
 
 const categories = ref([
   { id: 1, name: 'Vue', count: 12 },
   { id: 2, name: 'React', count: 8 },
-  { id: 3, name: 'Node.js', count: 15 }
-]);
+  { id: 3, name: 'Node.js', count: 15 },
+])
 
-const tags = ref(['Vue3', 'TypeScript', 'Vite', 'AI', 'Nodejs', 'Wasm']);
+const tags = ref(['Vue3', 'TypeScript', 'Vite', 'AI', 'Nodejs', 'Wasm'])
 
 const categoryDialog = reactive({
   visible: false,
   isEdit: false,
-  form: { id: 0, name: '' }
-});
+  form: { id: 0, name: '' },
+})
 
 const addCategory = () => {
-  categoryDialog.isEdit = false;
-  categoryDialog.form = { id: 0, name: '' };
-  categoryDialog.visible = true;
-};
+  categoryDialog.isEdit = false
+  categoryDialog.form = { id: 0, name: '' }
+  categoryDialog.visible = true
+}
 
 const editCategory = (row: any) => {
-  categoryDialog.isEdit = true;
-  categoryDialog.form = { ...row };
-  categoryDialog.visible = true;
-};
+  categoryDialog.isEdit = true
+  categoryDialog.form = { ...row }
+  categoryDialog.visible = true
+}
 
 const saveCategory = () => {
   if (categoryDialog.isEdit) {
-    const index = categories.value.findIndex(c => c.id === categoryDialog.form.id);
-    if (index !== -1) categories.value[index].name = categoryDialog.form.name;
+    const target = categories.value.find((c) => c.id === categoryDialog.form.id)
+    if (target) target.name = categoryDialog.form.name
   } else {
     categories.value.push({
       id: Date.now(),
       name: categoryDialog.form.name,
-      count: 0
-    });
+      count: 0,
+    })
   }
-  categoryDialog.visible = false;
-  ElMessage.success('保存成功');
-};
+  categoryDialog.visible = false
+  ElMessage.success('保存成功')
+}
 
 const deleteCategory = (row: any) => {
   ElMessageBox.confirm(`确定要删除分类 "${row.name}" 吗？`, '警告', {
-    type: 'warning'
+    type: 'warning',
   }).then(() => {
-    categories.value = categories.value.filter(c => c.id !== row.id);
-    ElMessage.success('删除成功');
-  });
-};
+    categories.value = categories.value.filter((c) => c.id !== row.id)
+    ElMessage.success('删除成功')
+  })
+}
 
 const addTag = () => {
   ElMessageBox.prompt('请输入标签名称', '新增标签').then(({ value }) => {
     if (value && !tags.value.includes(value)) {
-      tags.value.push(value);
-      ElMessage.success('标签已添加');
+      tags.value.push(value)
+      ElMessage.success('标签已添加')
     }
-  });
-};
+  })
+}
 
 const deleteTag = (tag: string) => {
-  tags.value = tags.value.filter(t => t !== tag);
-  ElMessage.success('标签已移除');
-};
+  tags.value = tags.value.filter((t) => t !== tag)
+  ElMessage.success('标签已移除')
+}
 </script>
 
 <style scoped lang="scss">
-@use "../../styles/variables.scss" as *;
-
 .admin-view {
-  padding-bottom: $spacing-xl;
+  padding-bottom: var(--space-xl);
 }
 
 .admin-card {
-  border-radius: $border-radius-large;
-  border: 1px solid $border-color;
-  margin-bottom: $spacing-lg;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
+  margin-bottom: var(--space-lg);
 
   .card-header {
     display: flex;
@@ -153,7 +156,7 @@ const deleteTag = (tag: string) => {
 .tags-container {
   display: flex;
   flex-wrap: wrap;
-  gap: $spacing-sm;
+  gap: var(--space-xs);
 
   .admin-tag {
     padding: 8px 12px;
