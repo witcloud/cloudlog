@@ -24,6 +24,9 @@ public class LogRetentionService {
     /** 登录日志保留天数：与访问日志同一天数，两个页签答的是「近半年」这同一个问题 */
     private static final int LOGIN_LOG_RETENTION_DAYS = 180;
 
+    /** 单批删除条数：单语句全量删在大流量下是长事务（行锁堆积、binlog 单笔巨大），分批让每批都短 */
+    private static final int PURGE_BATCH_SIZE = 5000;
+
     @Autowired
     private VisitLogMapper visitLogMapper;
 
@@ -42,7 +45,7 @@ public class LogRetentionService {
     private void purgeVisitLogs() {
         LocalDateTime threshold = LocalDateTime.now().minusDays(VISIT_LOG_RETENTION_DAYS);
         try {
-            int removed = visitLogMapper.deleteCreatedBefore(threshold);
+            int removed = purgeInBatches(visitLogMapper::deleteCreatedBefore, threshold);
             if (removed > 0) {
                 log.info("访问日志保留期清理：删除 {} 条早于 {} 的记录", removed, threshold);
             }
@@ -54,12 +57,26 @@ public class LogRetentionService {
     private void purgeLoginLogs() {
         LocalDateTime threshold = LocalDateTime.now().minusDays(LOGIN_LOG_RETENTION_DAYS);
         try {
-            int removed = loginLogMapper.deleteCreatedBefore(threshold);
+            int removed = purgeInBatches(loginLogMapper::deleteCreatedBefore, threshold);
             if (removed > 0) {
                 log.info("登录日志保留期清理：删除 {} 条早于 {} 的记录", removed, threshold);
             }
         } catch (Exception e) {
             log.error("登录日志保留期清理失败（阈值 {}）：{}", threshold, e.getMessage(), e);
         }
+    }
+
+    /**
+     * 按 PURGE_BATCH_SIZE 一批循环删到 0 行为止。每批独立提交，中途失败已删的不回滚（日志场景可接受），
+     * 下一天的例行任务会把剩余的接着清掉
+     */
+    private int purgeInBatches(java.util.function.ToIntBiFunction<LocalDateTime, Integer> deleteBatch,
+                               LocalDateTime threshold) {
+        int removed = 0;
+        int batch;
+        while ((batch = deleteBatch.applyAsInt(threshold, PURGE_BATCH_SIZE)) > 0) {
+            removed += batch;
+        }
+        return removed;
     }
 }

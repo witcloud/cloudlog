@@ -30,6 +30,11 @@ public class AdminUserService {
     public PageResult<AdminUserVO> getUsers(AdminUserQueryDTO queryDTO) {
         PageHelper.startPage(queryDTO.getPage(), queryDTO.getPageSize());
         List<AdminUserVO> list = userMapper.findAdminList(queryDTO.getKeyword(), queryDTO.getStatus());
+        // last_login_ip 原始值只在库侧：响应体一律下发脱敏地址（IpMaskUtils 的硬约束，
+        // 登录日志与访问日志页签都照办了，用户列表不能是例外）
+        for (AdminUserVO vo : list) {
+            vo.setLastLoginIp(com.ayun.common.IpMaskUtils.mask(vo.getLastLoginIp()));
+        }
         PageInfo<AdminUserVO> pageInfo = new PageInfo<>(list);
         return PageResult.of(pageInfo.getTotal(), pageInfo.getPageNum(), pageInfo.getPageSize(), list);
     }

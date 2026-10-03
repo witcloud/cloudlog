@@ -124,9 +124,12 @@ class ArticleServiceTest {
                 "key", "anonymousUser", List.of(new SimpleGrantedAuthority("ROLE_ANONYMOUS"))));
     }
 
-    /** 匿名访问者的来源地址靠请求对象取得，读路径用例必须先绑定一个（X-Forwarded-For 为空时用 remoteAddr 127.0.0.1） */
+    /** 匿名访问者的来源地址靠请求对象取得，读路径用例必须先绑定一个（X-Forwarded-For 为空时用 remoteAddr 127.0.0.1）。
+     *  UA 必须是真实浏览器串：bot 判定参与阅读计数（空 UA 判真不计数），不绑 UA 的去重桩会落空 */
     private void bindRequest(String forwardedFor) {
         MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("User-Agent",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
         if (forwardedFor != null) {
             request.addHeader("X-Forwarded-For", forwardedFor);
         }
@@ -423,7 +426,7 @@ class ArticleServiceTest {
         loginAs(7L, "reader@ayun.com");
         when(postMapper.findLikedByUser(7L)).thenReturn(List.of(
                 Post.builder().id(9L).title("标题").status("published").build()));
-        when(tagMapper.findByPostId(9L)).thenReturn(List.of());
+        when(tagMapper.findByPostIds(List.of(9L))).thenReturn(List.of());
 
         PageResult<PostVO> result = articleService.getLikedPosts(1, 10);
 
@@ -779,7 +782,7 @@ class ArticleServiceTest {
         when(postMapper.findMine(7L, null, null, null)).thenReturn(List.of(
                 Post.builder().id(9L).title("在线").status("published").build(),
                 Post.builder().id(10L).title("下线了").status("offline").build()));
-        when(tagMapper.findByPostId(anyLong())).thenReturn(List.of());
+        when(tagMapper.findByPostIds(any())).thenReturn(List.of());
 
         PageResult<PostVO> result = articleService.getMyPosts(1, 10, null, null, null);
 

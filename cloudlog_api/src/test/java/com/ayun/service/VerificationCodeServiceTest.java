@@ -44,6 +44,9 @@ class VerificationCodeServiceTest {
     @Mock
     private EmailService emailService;
 
+    @Mock
+    private com.ayun.common.IpUtils ipUtils;
+
     @InjectMocks
     private VerificationCodeService verificationCodeService;
 
@@ -55,6 +58,8 @@ class VerificationCodeServiceTest {
         lenient().when(valueOperations.setIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class)))
                 .thenReturn(true);
         lenient().when(valueOperations.increment(anyString())).thenReturn(1L);
+        // 邮箱层额度之外还有来源地址与全站两层日额度，取值只影响键名不影响语义
+        lenient().when(ipUtils.clientIp()).thenReturn("203.0.113.9");
     }
 
     /** 取出第 index 次 set 写入的键。verify 必须按总次数下断言，capture 才会收齐全部调用。 */
@@ -176,7 +181,8 @@ class VerificationCodeServiceTest {
         assertEquals("auth:code-limit:email-change:" + EMAIL, windows.get(1));
 
         ArgumentCaptor<String> dailyKeys = ArgumentCaptor.forClass(String.class);
-        verify(valueOperations, times(2)).increment(dailyKeys.capture());
+        // 两次发码 ×（邮箱额度 + 来源地址额度 + 全站额度）三层日额度
+        verify(valueOperations, times(6)).increment(dailyKeys.capture());
         assertEquals(2, (int) dailyKeys.getAllValues().stream()
                 .filter(key -> key.startsWith("auth:code-daily:") && key.endsWith(EMAIL)).count());
     }
@@ -189,9 +195,12 @@ class VerificationCodeServiceTest {
         verificationCodeService.sendRegistrationCode(EMAIL);
 
         ArgumentCaptor<Long> ttl = ArgumentCaptor.forClass(Long.class);
-        verify(redisTemplate).expire(anyString(), ttl.capture(), any(TimeUnit.class));
-        assertTrue(ttl.getValue() > 0 && ttl.getValue() <= 86400,
-                "TTL 应为距当日 24:00 的秒数，实际为 " + ttl.getValue());
+        // 邮箱、来源地址、全站三层日额度键都要设过期
+        verify(redisTemplate, times(3)).expire(anyString(), ttl.capture(), any(TimeUnit.class));
+        for (Long seconds : ttl.getAllValues()) {
+            assertTrue(seconds > 0 && seconds <= 86400,
+                    "TTL 应为距当日 24:00 的秒数，实际为 " + seconds);
+        }
     }
 
     // ---- 防穷举：auth:code-try:{用途}:{邮箱} 计数，单周期错满 5 次即作废验证码 ----

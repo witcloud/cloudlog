@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * 全局异常处理器：把业务异常统一转为 Result 结构，前端拦截器可读取 message 提示
@@ -124,6 +126,27 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleBiz(BizException e) {
         return Result.error(400, e.getMessage());
+    }
+
+    /**
+     * 上传体积超过 multipart 上限。注释见 UploadController：调用方可读的拒绝（换小一点的文件），
+     * 不接这条就会落到 RuntimeException 兜底变 500
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        return Result.error(400, "上传文件大小超出限制");
+    }
+
+    /**
+     * 请求体不是合法 JSON 或与目标类型不符。同样是调用方可读的输入错误，报 400 而非 500；
+     * message 含反序列化细节，只进日志
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleNotReadable(HttpMessageNotReadableException e) {
+        log.warn("请求体不可读: {}", e.getMessage());
+        return Result.error(400, "请求体格式错误");
     }
 
     /**

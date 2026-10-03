@@ -11,7 +11,10 @@ import com.ayun.service.FollowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "作者主页", description = "公开访问的作者身份、统计与关注意向，无需登录")
 @RestController
 @RequestMapping("/users")
+@Validated // @RequestParam 上的约束靠方法级校验生效，缺它 pageSize=-1 会一路拼进 LIMIT 变 500
 public class AuthorProfileController {
 
     @Autowired
@@ -53,8 +57,8 @@ public class AuthorProfileController {
     @GetMapping("/{id}/following")
     public Result<PageResult<UserBriefVO>> following(
             @PathVariable Long id,
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer pageSize) {
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) Integer pageSize) {
         return Result.success(followService.listFollowingOf(id, page, pageSize));
     }
 
@@ -66,8 +70,8 @@ public class AuthorProfileController {
     @GetMapping("/{id}/followers")
     public Result<PageResult<UserBriefVO>> followers(
             @PathVariable Long id,
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer pageSize) {
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) Integer pageSize) {
         return Result.success(followService.listFollowersOf(id, page, pageSize));
     }
 
@@ -79,8 +83,8 @@ public class AuthorProfileController {
     @GetMapping("/{id}/liked-posts")
     public Result<PageResult<PostVO>> likedPosts(
             @PathVariable Long id,
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer pageSize) {
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) Integer pageSize) {
         return Result.success(articleService.getLikedPostsOf(id, page, pageSize));
     }
 }

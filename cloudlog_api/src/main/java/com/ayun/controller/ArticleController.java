@@ -17,7 +17,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "文章管理", description = "文章的增删改查及点赞功能")
 @RestController
 @RequestMapping("/articles")
+@Validated // @RequestParam 上的约束靠方法级校验生效
 public class ArticleController {
 
     @Autowired
@@ -55,8 +59,8 @@ public class ArticleController {
     @Operation(summary = "分页获取当前用户的未发布文章")
     @GetMapping("/drafts")
     public Result<DraftPageVO> getDrafts(
-            @RequestParam(defaultValue = "1") Integer pageNum,
-            @RequestParam(defaultValue = "10") Integer pageSize,
+            @RequestParam(defaultValue = "1") @Min(1) Integer pageNum,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) Integer pageSize,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
             @RequestParam(required = false) String keyword,
@@ -70,8 +74,8 @@ public class ArticleController {
     @Operation(summary = "分页获取当前用户的文章（已发布与已下线）")
     @GetMapping("/mine")
     public Result<PageResult<PostVO>> getMyPosts(
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "10") Integer pageSize,
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) Integer pageSize,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
             @RequestParam(required = false) String keyword) {

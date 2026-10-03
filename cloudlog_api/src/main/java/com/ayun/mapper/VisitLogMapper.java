@@ -21,9 +21,10 @@ public interface VisitLogMapper {
     int insert(VisitLog visitLog);
 
     /**
-     * 删除该时刻之前的日志行，返回删除条数；由日志保留期任务按天调用
+     * 删除该时刻之前的日志行，单批最多 batchSize 条，返回删除条数；由日志保留期任务循环调到 0 行为止。
+     * 单语句全量删在大流量下是长事务：行锁堆积、binlog 单笔巨大，分批让每批都短
      */
-    int deleteCreatedBefore(@Param("threshold") LocalDateTime threshold);
+    int deleteCreatedBefore(@Param("threshold") LocalDateTime threshold, @Param("batchSize") int batchSize);
 
     /**
      * 概览卡的四个数：本窗口的 PV / UV / 被访问过的文章数，加上前一等长窗口的 PV。

@@ -7,6 +7,8 @@ import com.ayun.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,8 +17,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 文件上传控制器
@@ -30,8 +34,16 @@ public class UploadController {
     private final FileService fileService;
     private final UserService userService;
 
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
     // 允许的图片格式
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("image/jpeg", "image/png", "image/gif", "image/webp");
+
+    /** 每用户每日上传次数上限：单文件虽有 10MB 上限，但次数不限等于登录用户可循环上传占满对象存储 */
+    private static final long DAILY_UPLOAD_LIMIT = 100;
+
+    private static final String UPLOAD_DAILY_KEY_PREFIX = "upload:daily:";
 
     /**
      * 上传用户头像
@@ -91,6 +103,27 @@ public class UploadController {
         if (contentType == null || !ALLOWED_EXTENSIONS.contains(contentType.toLowerCase())) {
             throw new BizException("不支持的文件格式，请上传图片 (jpg, png, gif, webp)");
         }
+        requireDailyQuota();
         return fileService.upload(file, category);
+    }
+
+    /**
+     * 每用户每日上传次数额度。格式与体积校验之后、转存对象之前计数：
+     * 被限流的请求不占 MinIO 存储，校验失败的请求也不烧额度
+     */
+    private void requireDailyQuota() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        com.ayun.entity.User user = userService.findByEmail(email);
+        if (user == null) {
+            return;
+        }
+        String key = UPLOAD_DAILY_KEY_PREFIX + user.getId();
+        Long count = redisTemplate.opsForValue().increment(key);
+        if (count != null && count == 1L) {
+            redisTemplate.expire(key, Duration.ofDays(1).toMillis(), TimeUnit.MILLISECONDS);
+        }
+        if (count != null && count > DAILY_UPLOAD_LIMIT) {
+            throw new BizException("今日上传次数已达上限，请明日再试");
+        }
     }
 }

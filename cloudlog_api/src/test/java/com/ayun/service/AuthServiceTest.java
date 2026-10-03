@@ -472,14 +472,14 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("未注册的邮箱不发送重置码，不占用该邮箱的发码额度")
+    @DisplayName("未注册的邮箱不发码也不报错：响应一律成功，不给撞库者账号存在性差异")
     void resetCodeIsNotMailedToUnknownEmail() {
         when(userMapper.findByEmail(RESET_EMAIL)).thenReturn(null);
 
-        BizException error = org.junit.jupiter.api.Assertions.assertThrows(BizException.class,
+        // 静默跳过（防枚举）：对外与「已注册」完全同口径，真实差异只在发码这一步
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
                 () -> authService.sendPasswordResetCode(RESET_EMAIL));
 
-        assertEquals("该邮箱尚未注册", error.getMessage());
         verifyNoInteractions(verificationCodeService);
     }
 

@@ -10,6 +10,7 @@ import com.ayun.service.BannedWordService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -35,7 +36,7 @@ public class AdminBannedWordController {
 
     @Operation(summary = "分页查询违禁词库", description = "keyword 按词面模糊匹配；按添加时间倒序")
     @GetMapping
-    public Result<PageResult<BannedWord>> getWords(AdminBannedWordQueryDTO queryDTO) {
+    public Result<PageResult<BannedWord>> getWords(@Valid AdminBannedWordQueryDTO queryDTO) {
         return Result.success(bannedWordService.getWords(queryDTO));
     }
 

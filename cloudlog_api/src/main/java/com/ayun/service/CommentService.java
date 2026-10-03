@@ -108,6 +108,11 @@ public class CommentService {
             throw new NotFoundException("文章不存在或无权访问");
         }
         requireReplyableParent(comment);
+        // 根评论的 parentId 归一化为 0：insert 显式列出 parent_id 列，null 会原样落库（DEFAULT 0 挡不住显式 NULL），
+        // 而读侧只认 parent_id = 0，不归一就是「发得出、计数照加、列表永远看不见」的幽灵评论
+        if (comment.getParentId() == null) {
+            comment.setParentId(0);
+        }
         comment.setUserId(user.getId());
 
         int intervalSeconds = settingsService.getInt(SettingsService.KEY_COMMENT_INTERVAL_SECONDS,

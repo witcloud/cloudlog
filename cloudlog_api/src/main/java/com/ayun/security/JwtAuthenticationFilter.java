@@ -67,7 +67,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
             // 验证 Token 是否有效，再看它是否签发于该账号的失效水位之前（重置过口令的账号，旧 token 到此为止）
             if (userDetails != null && jwtUtils.validateToken(jwt, userDetails.getUsername())
-                    && !tokenRevocationService.isRevoked(email, jwtUtils.extractIssuedAt(jwt))) {
+                    && !isRevokedSafe(email, jwt)) {
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -76,5 +76,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * 失效水位挂在 Redis 上：抖动或宕机时异常不能冲出过滤器，否则所有带 token 的请求都被打成 500。
+     * 查询失败按「未作废」放行（fail-open）——水位只是改密/重置口令后的补充防线，
+     * 签名校验与账号状态检查仍在前两步，不会因此放过无效凭证
+     */
+    private boolean isRevokedSafe(String email, String jwt) {
+        try {
+            return tokenRevocationService.isRevoked(email, jwtUtils.extractIssuedAt(jwt));
+        } catch (Exception e) {
+            logger.warn("查询 token 失效水位失败，按未作废放行: " + e.getMessage());
+            return false;
+        }
     }
 }

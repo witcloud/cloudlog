@@ -18,9 +18,9 @@
         VALUES (#{postId}, #{ip}, #{userAgent})
     </insert>
 
-    <!-- 保留期清理：谓词只有 created_at 一个范围，走 idx_created_at -->
+    <!-- 保留期清理：谓词只有 created_at 一个范围，走 idx_created_at；LIMIT 分批由服务层循环驱动 -->
     <delete id="deleteCreatedBefore">
-        DELETE FROM visit_logs WHERE created_at &lt; #{threshold}
+        DELETE FROM visit_logs WHERE created_at &lt; #{threshold} LIMIT #{batchSize}
     </delete>
 
     <!-- 两条窗口在一次扫描里按时刻落在哪一侧分别计数：SUM(布尔) 是本窗口的行数，

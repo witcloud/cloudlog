@@ -126,8 +126,11 @@ public class AuthService {
         String clientIp = ipUtils.clientIp();
         // UA 与来源地址都只能在请求线程取：日志写入是异步的，换到线程池后请求上下文就空了
         String userAgent = clientUserAgent();
-        String failKey = LOGIN_FAIL_KEY_PREFIX + request.getEmail() + ":" + clientIp;
-        String globalFailKey = GLOBAL_LOGIN_FAIL_KEY_PREFIX + request.getEmail();
+        // 计数键必须用归一化邮箱：MySQL 的 ci 排序规则下 Admin@X.com 与 admin@x.com 命中同一账号，
+        // 键不归一就是每个大小写变体各领一套爆破额度，两层锁定形同虚设
+        String email = normalizeEmail(request.getEmail());
+        String failKey = LOGIN_FAIL_KEY_PREFIX + email + ":" + clientIp;
+        String globalFailKey = GLOBAL_LOGIN_FAIL_KEY_PREFIX + email;
         int globalMaxFailures = Math.max(GLOBAL_FAILURES_FLOOR, policy.getMaxFailures() * 5);
         // 两层计数任一到阈即锁：来源地址层挡单点穷举，邮箱层挡换 IP 的分布式穷举。
         // 锁定期间不再校验口令：既不给穷举者「邮箱存在与否」的差异反馈，也不让每次尝试都消耗一次 BCrypt 计算
@@ -219,6 +222,24 @@ public class AuthService {
     }
 
     /**
+     * 登出：把该账号的失效水位推到此刻，早于它签发的 token 全部作废。
+     * 水位按账号记而非按单枚 token 拉黑，因此这是「踢掉该账号全部在存会话」——
+     * 在没有刷新令牌的体系里按枚吊销做不到，全量作废对「密码可能在别处泄露」的用户反而是更安全的自助手段
+     * @param email 账号邮箱，即 JWT 的 subject
+     */
+    public void logout(String email) {
+        tokenRevocationService.revokeBeforeNow(email);
+    }
+
+    /**
+     * 邮箱归一化：Redis 计数键与验证码键统一用小写去空格形式分键。
+     * 库表是 ci 排序规则、查库不区分大小写，键若不归一，大小写变体就是互不感知的独立额度
+     */
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
+    }
+
+    /**
      * 根据邮箱获取当前登录用户信息
      * @param email 用户邮箱
      * @return 用户对象
@@ -239,15 +260,16 @@ public class AuthService {
     }
 
     /**
-     * 向已注册账号的邮箱发送重置密码验证码。
-     * 邮箱未注册时直接拒绝，与注册发码的反馈口径一致；投递与频控由 VerificationCodeService 承担
+     * 发送重置密码验证码。
+     * 邮箱未注册时静默跳过（不抛「该邮箱尚未注册」）：找密链路若区分「已注册/未注册」，
+     * 就是一份可批量采集的账号存在性名单。响应一律成功，真实差异只留在登录日志；
+     * 投递与频控由 VerificationCodeService 承担
      * @param email 账号邮箱
      */
     public void sendPasswordResetCode(String email) {
-        if (userMapper.findByEmail(email) == null) {
-            throw new BizException("该邮箱尚未注册");
+        if (userMapper.findByEmail(email) != null) {
+            verificationCodeService.sendPasswordResetCode(email);
         }
-        verificationCodeService.sendPasswordResetCode(email);
     }
 
     /**
@@ -261,7 +283,9 @@ public class AuthService {
     public void resetPassword(PasswordResetRequest request) {
         User user = userMapper.findByEmail(request.getEmail());
         if (user == null) {
-            throw new BizException("该邮箱尚未注册");
+            // 与发码侧同口径：未注册邮箱在这里报「验证码错误或已过期」而非「尚未注册」，
+            // 不给撞库者任何账号存在性差异。发码已只对已注册邮箱投递，正常路径不可能带有效码走到这里
+            throw new BizException("验证码错误或已过期");
         }
         if (!verificationCodeService.verifyPasswordResetCode(request.getEmail(), request.getCode())) {
             throw new BizException("验证码错误或已过期");

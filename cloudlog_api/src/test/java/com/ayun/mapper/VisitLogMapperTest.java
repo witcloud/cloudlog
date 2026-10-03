@@ -232,7 +232,7 @@ class VisitLogMapperTest {
         insertRow(post.id(), TEST_IP_PREFIX + "5.5", "Mozilla/5.0 Chrome/120.0.0.0", LocalDateTime.now().minusDays(181));
         insertRow(post.id(), TEST_IP_PREFIX + "4.5", "Mozilla/5.0 Chrome/120.0.0.0", LocalDateTime.now().minusDays(179));
 
-        int removed = visitLogMapper.deleteCreatedBefore(LocalDateTime.now().minusDays(180));
+        int removed = visitLogMapper.deleteCreatedBefore(LocalDateTime.now().minusDays(180), 5000);
 
         assertTrue(removed >= 1, "应当至少删掉本用例那一行超期记录");
         assertEquals(0, countTestRowsBefore(LocalDateTime.now().minusDays(180)));

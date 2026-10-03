@@ -5,6 +5,7 @@ import com.ayun.common.BizException;
 import com.ayun.common.ExcerptUtils;
 import com.ayun.common.IpUtils;
 import com.ayun.common.NotFoundException;
+import com.ayun.common.UserAgentClassifier;
 import com.ayun.entity.Post;
 import com.ayun.entity.Tag;
 import com.ayun.mapper.CommentMapper;
@@ -33,7 +34,12 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * 文章业务逻辑类
@@ -87,6 +93,12 @@ public class ArticleService {
 
     /** posts.status 是这四值的 ENUM（db-design.md §2.2），白名单与它同源；越界值撞 MySQL 严格模式是 500 */
     private static final List<String> ALLOWED_STATUS = List.of("draft", "published", "scheduled", "offline");
+
+    /**
+     * 业务时区：计划时刻、发布时间的判定统一按北京墙钟。jackson 的 time-zone 与 JDBC 的
+     * serverTimezone 都锚在 GMT+8（application.yml），JVM 时区不同也不会错位
+     */
+    static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
 
     /**
      * 去重的写入与过期合成一条脚本发给 Redis。分三条命令发就有崩溃缝：SADD 之后、EXPIRE 之前进程挂掉，
@@ -182,18 +194,37 @@ public class ArticleService {
     }
 
     /**
-     * 列表 VO 需要标签，但标签在子表里，逐条补齐
+     * 列表 VO 需要标签，但标签在子表里：按本页文章 ID 一次批量取回再分组装配。
+     * 逐条 findByPostId 在页容量 50 时就是 51 条 SQL
      */
     private List<Post> fillTags(List<Post> list) {
+        if (list.isEmpty()) {
+            return list;
+        }
+        List<Long> postIds = new ArrayList<>(list.size());
         for (Post post : list) {
-            post.setTags(tagMapper.findByPostId(post.getId()));
+            postIds.add(post.getId());
+        }
+        Map<Long, List<Tag>> tagsByPostId = new HashMap<>();
+        for (Map<String, Object> row : tagMapper.findByPostIds(postIds)) {
+            Tag tag = new Tag();
+            tag.setId(((Number) row.get("id")).intValue());
+            tag.setName((String) row.get("name"));
+            long postId = ((Number) row.get("post_id")).longValue();
+            tagsByPostId.computeIfAbsent(postId, key -> new ArrayList<>()).add(tag);
+        }
+        for (Post post : list) {
+            post.setTags(tagsByPostId.getOrDefault(post.getId(), List.of()));
         }
         return list;
     }
 
     /**
-     * 删除单篇未发布文章（草稿与定时发布）。属主三条件先经 SQL 谓词确认，再走全站唯一的级联删除
+     * 删除单篇未发布文章（草稿与定时发布）。属主三条件先经 SQL 谓词确认，再走全站唯一的级联删除。
+     * 事务必须挂在这里而不是 cascadeDelete：private 方法上的 @Transactional 不生效，
+     * 不挂的话四条 DELETE 各自 auto-commit，中途失败会留下「主行还在、子行已删」的脏状态
      */
+    @Transactional
     public void deleteDraft(Long id) {
         com.ayun.entity.User user = currentUser();
         Post post = postMapper.findOwnedDraft(id, user.getId());
@@ -204,8 +235,10 @@ public class ArticleService {
     }
 
     /**
-     * 清空当前用户的草稿箱（草稿与定时发布）：逐条走同一条级联实现，不留子行孤儿
+     * 清空当前用户的草稿箱（草稿与定时发布）：逐条走同一条级联实现，不留子行孤儿。
+     * 整箱同事务：清到一半失败全部回滚，不会留下删了一半的草稿箱
      */
+    @Transactional
     public void clearDrafts() {
         com.ayun.entity.User user = currentUser();
         for (Long id : postMapper.findDraftIdsByAuthor(user.getId())) {
@@ -257,13 +290,15 @@ public class ArticleService {
 
     /**
      * 定时发布的计划时刻：调度器按 published_at 到期命中，缺它文章永不自动发布。
-     * 文案与 DTO 的 @Future 消息一致，避免同一规则出现两套说法
+     * 文案与 DTO 的 @Future 消息一致，避免同一规则出现两套说法。
+     * 「当前时间」固定取 Asia/Shanghai：publishTime 经 @JsonFormat(GMT+8) 反序列化就是北京墙钟，
+     * 若用 JVM 默认时区的 now() 对比，容器以 UTC 运行时校验会错位 8 小时
      */
     private LocalDateTime requireFuturePublishTime(LocalDateTime publishTime) {
         if (publishTime == null) {
             throw new BizException("请选择定时发布时间");
         }
-        if (publishTime.isBefore(LocalDateTime.now())) {
+        if (publishTime.isBefore(LocalDateTime.now(BUSINESS_ZONE))) {
             throw new BizException("定时发布时间需晚于当前时间");
         }
         return publishTime;
@@ -295,13 +330,8 @@ public class ArticleService {
         );
         PageInfo<Post> pageInfo = new PageInfo<>(list);
 
-        // 为列表中的文章填充标签
-        for (Post post : list) {
-            post.setTags(tagMapper.findByPostId(post.getId()));
-        }
-
-        // 转换为 VO 列表
-        List<PostVO> voList = postConverter.toVOList(list);
+        // 为列表中的文章填充标签（与本类其他列表共用批量装配）
+        List<PostVO> voList = postConverter.toVOList(fillTags(list));
 
         return PageResult.of(
                 pageInfo.getTotal(),
@@ -337,14 +367,19 @@ public class ArticleService {
             return null;
         }
         post.setTags(tagMapper.findByPostId(id));
-        // 阅读量只认真实阅读：未发布内容（作者预览草稿/定时、已下线文章）不计数，已发布的按访问者小时窗口去重
-        boolean counted = "published".equals(post.getStatus()) && isFirstVisitWithinHour(id);
+        // 阅读量只认真实阅读：未发布内容（作者预览草稿/定时、已下线文章）不计数，已发布的按访问者小时窗口去重。
+        // bot 判定必须参与 counted：visit_logs 写入侧会丢弃爬虫，这里不一起判的话，
+        // 爬虫访问会推高 view_count 却不留日志行，两侧对不上账
+        String userAgent = clientUserAgent();
+        boolean counted = "published".equals(post.getStatus())
+                && !UserAgentClassifier.isBot(userAgent)
+                && isFirstVisitWithinHour(id);
         if (counted) {
             // 阅读量落在库侧：DB 列是展示与排序的真源，Redis 只承担去重，不再维护第二个计数器
             postMapper.incrementViewCount(id);
             // 与 +1 同一判据、同一时刻：一次窗口首访 = view_count +1 = visit_logs 一行，两侧天然可对账。
             // 原始地址与 UA 必须在这条（请求）线程上取——recordVisit 是 @Async，换线程后取不到请求上下文
-            visitLogService.recordVisit(id, ipUtils.clientIp(), clientUserAgent());
+            visitLogService.recordVisit(id, ipUtils.clientIp(), userAgent);
         }
         // 响应体与是否真的自增保持一致：本次没 +1 就原样返回查库值，重复访问不会凭空多一次阅读。
         // view_count 建表可空，取不到值时按 0 起算，不让读路径抛空指针
@@ -413,11 +448,13 @@ public class ArticleService {
     }
 
     /**
-     * 本次请求申报的 User-Agent 原样，供访问日志落库与归类。只从请求头读，不做任何加工
+     * 本次请求申报的 User-Agent 原样，供访问日志落库与归类。只从请求头读，不做任何加工。
+     * 请求上下文不在（非 HTTP 调用路径）时返回 null，isBot 对 null 判真，阅读不会计入
      */
     private String clientUserAgent() {
-        HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-        return request.getHeader("User-Agent");
+        ServletRequestAttributes attrs =
+                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        return attrs != null ? attrs.getRequest().getHeader("User-Agent") : null;
     }
 
     /**
@@ -446,10 +483,11 @@ public class ArticleService {
         }
         generateExcerptIfAbsent(post);
         postMapper.insert(post);
-        
-        // 处理标签
-        if (createDTO.getTagIds() != null) {
-            for (Integer tagId : createDTO.getTagIds()) {
+
+        // 处理标签（去 null、去重、校验存在性后再落关联）
+        List<Integer> tagIds = requireKnownTags(createDTO.getTagIds());
+        if (tagIds != null) {
+            for (Integer tagId : tagIds) {
                 tagMapper.insertPostTag(post.getId(), tagId);
             }
         }
@@ -506,10 +544,26 @@ public class ArticleService {
 
         if (updateDTO.getTagIds() != null) {
             tagMapper.deletePostTags(id);
-            for (Integer tagId : updateDTO.getTagIds()) {
+            for (Integer tagId : requireKnownTags(updateDTO.getTagIds())) {
                 tagMapper.insertPostTag(id, tagId);
             }
         }
+    }
+
+    /**
+     * 标签入参治理：去 null、去重、校验存在性，返回治理后的列表（null 透传表示「本次不动标签」）。
+     * 不治理的两个后果都在写库时才炸：重复 id 撞 post_tags 主键冒 500；
+     * 不存在的 id 留孤儿关联（schema 对 post_tags 无外键，findByPostId 内连接后不可见）
+     */
+    private List<Integer> requireKnownTags(List<Integer> tagIds) {
+        if (tagIds == null) {
+            return null;
+        }
+        List<Integer> distinct = tagIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (!distinct.isEmpty() && tagMapper.countExisting(distinct) != distinct.size()) {
+            throw new BizException("包含不存在的标签");
+        }
+        return distinct;
     }
 
     /**

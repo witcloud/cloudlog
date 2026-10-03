@@ -42,6 +42,18 @@ public interface TagMapper {
     List<Tag> findByPostId(@Param("postId") Long postId);
 
     /**
+     * 按文章 ID 集合批量取标签关联（post_id + 标签三列，Map 承载）：
+     * 列表页一次装配整页文章的标签，替代逐篇 findByPostId 的 N+1
+     */
+    List<java.util.Map<String, Object>> findByPostIds(@Param("postIds") List<Long> postIds);
+
+    /**
+     * 统计给定 ID 中真实存在的标签数。发文章时校验 tagIds：不存在的 id 若放行，
+     * 会留下无外键兜底的孤儿关联（schema 对 post_tags 不设外键）
+     */
+    int countExisting(@Param("ids") List<Integer> ids);
+
+    /**
      * 插入新标签
      */
     int insert(Tag tag);

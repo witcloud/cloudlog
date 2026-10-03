@@ -16,8 +16,12 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -27,6 +31,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/user")
 @RequiredArgsConstructor
+@Validated // @RequestParam 上的约束靠方法级校验生效
 public class UserController {
 
     private final UserService userService;
@@ -68,7 +73,8 @@ public class UserController {
      */
     @Operation(summary = "发送修改邮箱验证码")
     @PostMapping("/email/code")
-    public Result<Void> sendEmailChangeCode(@Parameter(description = "新邮箱") @RequestParam String newEmail) {
+    public Result<Void> sendEmailChangeCode(@Parameter(description = "新邮箱")
+                                            @RequestParam @Email(message = "新邮箱格式不正确") String newEmail) {
         userService.sendEmailChangeCode(newEmail);
         return Result.success();
     }
@@ -110,8 +116,8 @@ public class UserController {
     @Operation(summary = "我关注的用户列表")
     @GetMapping("/following")
     public Result<PageResult<UserBriefVO>> getFollowing(
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) Integer pageSize) {
         return Result.success(followService.listFollowing(page, pageSize));
     }
 
@@ -121,8 +127,8 @@ public class UserController {
     @Operation(summary = "关注我的用户列表")
     @GetMapping("/followers")
     public Result<PageResult<UserBriefVO>> getFollowers(
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) Integer pageSize) {
         return Result.success(followService.listFollowers(page, pageSize));
     }
 
@@ -132,8 +138,8 @@ public class UserController {
     @Operation(summary = "我点赞过的文章列表")
     @GetMapping("/liked-posts")
     public Result<PageResult<PostVO>> getLikedPosts(
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
+            @RequestParam(defaultValue = "1") @Min(1) Integer page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) Integer pageSize) {
         return Result.success(articleService.getLikedPosts(page, pageSize));
     }
 }

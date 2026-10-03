@@ -169,7 +169,7 @@ class LoginLogMapperTest {
         insert(EMAIL_A, null, IP_ONE, null, LoginLog.RESULT_WRONG_PASSWORD, threshold.minusSeconds(1));
         insert(EMAIL_A, null, IP_ONE, null, LoginLog.RESULT_WRONG_PASSWORD, threshold);
 
-        loginLogMapper.deleteCreatedBefore(threshold);
+        loginLogMapper.deleteCreatedBefore(threshold, 5000);
 
         List<LoginLogVO.LoginRow> left = loginLogMapper.findAdminList(null, null, EMAIL_A, null, null);
         assertEquals(1, left.size(), "恰好等于阈值的行不属于「早于」");

@@ -24,3 +24,19 @@ management:
 app:
   security:
     trust-forwarded-for: false
+
+# 生产日志：默认配置（application.yml）是开发档的 DEBUG，只进控制台；
+# 生产压到 info、落文件并按体积滚动归档，避免 DEBUG 刷屏与重启即丢日志
+logging:
+  level:
+    com.ayun: info
+    org.springframework.security: warn
+  file:
+    # 相对进程工作目录；用 systemd 托管时建议改为绝对路径（如 /var/log/cloudlog/cloudlog.log）
+    name: logs/cloudlog.log
+  logback:
+    rollingpolicy:
+      file-name-pattern: logs/cloudlog-%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 20MB
+      max-history: 30
+      total-size-cap: 1GB

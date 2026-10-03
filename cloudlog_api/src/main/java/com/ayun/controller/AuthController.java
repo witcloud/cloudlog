@@ -10,6 +10,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -72,6 +75,21 @@ public class AuthController {
     @PostMapping("/password/reset")
     public Result<Void> resetPassword(@Valid @RequestBody PasswordResetRequest request) {
         authService.resetPassword(request);
+        return Result.success();
+    }
+
+    /**
+     * 登出。JWT 本身无状态，服务端把该账号的失效水位推到此刻作废全部在存 token；
+     * 幂等设计：未带 token 或上下文未认证时同样返回成功，前端清完本地凭据即可
+     */
+    @Operation(summary = "登出")
+    @PostMapping("/logout")
+    public Result<Void> logout() {
+        // /auth/** 整体 permitAll，未登录时这里是 AnonymousAuthenticationToken，须排除
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
+            authService.logout(auth.getName());
+        }
         return Result.success();
     }
 }

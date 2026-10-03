@@ -2,6 +2,7 @@ package com.ayun.service;
 
 import cn.hutool.core.util.RandomUtil;
 import com.ayun.common.BizException;
+import com.ayun.common.IpUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,9 @@ public class VerificationCodeService {
     @Autowired
     private EmailService emailService;
 
+    @Autowired
+    private IpUtils ipUtils;
+
     private static final String CODE_KEY_PREFIX = "auth:code:";
     private static final String EMAIL_CHANGE_CODE_KEY_PREFIX = "auth:code-change:";
     private static final String PASSWORD_RESET_CODE_KEY_PREFIX = "auth:code-reset:";
@@ -39,12 +43,21 @@ public class VerificationCodeService {
     /** 当日额度用完与 60 秒限流是两件事：前者今天怎么做都不行，后者等一分钟就好，提示不能复用一句 */
     private static final String DAILY_LIMIT_REACHED = "今日发送次数已达上限，请明日再试";
 
+    /**
+     * 按「来源地址」与全站的当日发码额度：邮箱维度只约束单个地址，
+     * 持邮箱列表的攻击者可以绕开它把站方 SMTP 配额整体耗尽（邮件轰炸中继），这两层兜的是那个口子
+     */
+    private static final String SEND_IP_DAILY_KEY_PREFIX = "auth:code-ip-daily:";
+    private static final String SEND_GLOBAL_DAILY_KEY = "auth:code-global-daily";
+    private static final long SEND_IP_DAILY_LIMIT = 30;
+    private static final long SEND_GLOBAL_DAILY_LIMIT = 500;
+
     /** 单个验证码周期内允许的校验失败次数，计满即作废该验证码 */
     private static final long MAX_CODE_TRIES = 5L;
     private static final String TOO_MANY_CODE_TRIES = "验证码错误次数过多，请重新获取";
 
     /**
-     * 发码前置频控：60 秒窗口与当日额度都按「用途 + 邮箱」分键，互不影响。
+     * 发码前置频控：60 秒窗口与当日额度按「用途 + 邮箱」分键，另加来源地址与全站两层日额度兜底。
      * 必须排在生成验证码之前，被限流时既不烧验证码也不消耗邮件（business-model.md §3.2「验证码与注册的防刷」）
      */
     private void checkSendAllowed(String purpose, String email) {
@@ -55,21 +68,32 @@ public class VerificationCodeService {
             throw new BizException(TOO_FREQUENTLY);
         }
 
-        String dailyKey = SEND_DAILY_KEY_PREFIX + scoped;
-        Long todayCount = redisTemplate.opsForValue().increment(dailyKey);
-        if (todayCount != null && todayCount == 1L) {
-            redisTemplate.expire(dailyKey, secondsUntilNextMidnight(), TimeUnit.SECONDS);
+        consumeDailyQuota(SEND_DAILY_KEY_PREFIX + scoped, SEND_DAILY_LIMIT, DAILY_LIMIT_REACHED);
+        // 邮箱层的 60 秒窗口挡不住换邮箱继续发：IP 与全站额度放在邮箱额度之后、生成验证码之前
+        consumeDailyQuota(SEND_IP_DAILY_KEY_PREFIX + ipUtils.clientIp(), SEND_IP_DAILY_LIMIT, DAILY_LIMIT_REACHED);
+        consumeDailyQuota(SEND_GLOBAL_DAILY_KEY, SEND_GLOBAL_DAILY_LIMIT, DAILY_LIMIT_REACHED);
+    }
+
+    /**
+     * 当日额度计数：INCR 由 Redis 服务端完成，首个计数把键活到本地 24:00，跨天自然归零，不需要额外的重置任务。
+     * 超出阈值即拒绝，多出的计数无害，键到点自灭
+     */
+    private void consumeDailyQuota(String key, long limit, String message) {
+        Long count = redisTemplate.opsForValue().increment(key);
+        if (count != null && count == 1L) {
+            redisTemplate.expire(key, secondsUntilNextMidnight(), TimeUnit.SECONDS);
         }
-        if (todayCount != null && todayCount > SEND_DAILY_LIMIT) {
-            throw new BizException(DAILY_LIMIT_REACHED);
+        if (count != null && count > limit) {
+            throw new BizException(message);
         }
     }
 
     /**
-     * 当日额度键活到本地 24:00，跨天自然归零，不需要额外的重置任务
+     * 当日额度键活到本地 24:00，跨天自然归零，不需要额外的重置任务。
+     * 「本地」锚 Asia/Shanghai：与 Jackson/JDBC 的 GMT+8 同源，JVM 以别的时区运行时日额度也不漂移
      */
     private long secondsUntilNextMidnight() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ArticleService.BUSINESS_ZONE);
         return Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay()).getSeconds();
     }
 
@@ -78,6 +102,7 @@ public class VerificationCodeService {
      * @param email 用户邮箱
      */
     public void sendRegistrationCode(String email) {
+        email = normalizeEmail(email);
         checkSendAllowed(PURPOSE_REGISTRATION, email);
 
         // 生成 6 位数字验证码
@@ -99,7 +124,7 @@ public class VerificationCodeService {
      * @return 是否校验通过
      */
     public boolean verifyCode(String email, String code) {
-        return verify(PURPOSE_REGISTRATION, CODE_KEY_PREFIX, email, code);
+        return verify(PURPOSE_REGISTRATION, CODE_KEY_PREFIX, normalizeEmail(email), code);
     }
 
     /**
@@ -107,6 +132,7 @@ public class VerificationCodeService {
      * @param newEmail 待绑定的新邮箱
      */
     public void sendEmailChangeCode(String newEmail) {
+        newEmail = normalizeEmail(newEmail);
         checkSendAllowed(PURPOSE_EMAIL_CHANGE, newEmail);
 
         String code = RandomUtil.randomNumbers(6);
@@ -124,7 +150,7 @@ public class VerificationCodeService {
      * @return 是否校验通过
      */
     public boolean verifyEmailChangeCode(String newEmail, String code) {
-        return verify(PURPOSE_EMAIL_CHANGE, EMAIL_CHANGE_CODE_KEY_PREFIX, newEmail, code);
+        return verify(PURPOSE_EMAIL_CHANGE, EMAIL_CHANGE_CODE_KEY_PREFIX, normalizeEmail(newEmail), code);
     }
 
     /**
@@ -132,6 +158,7 @@ public class VerificationCodeService {
      * @param email 账号邮箱
      */
     public void sendPasswordResetCode(String email) {
+        email = normalizeEmail(email);
         checkSendAllowed(PURPOSE_PASSWORD_RESET, email);
 
         String code = RandomUtil.randomNumbers(6);
@@ -149,7 +176,7 @@ public class VerificationCodeService {
      * @return 是否校验通过
      */
     public boolean verifyPasswordResetCode(String email, String code) {
-        return verify(PURPOSE_PASSWORD_RESET, PASSWORD_RESET_CODE_KEY_PREFIX, email, code);
+        return verify(PURPOSE_PASSWORD_RESET, PASSWORD_RESET_CODE_KEY_PREFIX, normalizeEmail(email), code);
     }
 
     /**
@@ -207,5 +234,13 @@ public class VerificationCodeService {
     private long codeTries(String tryKey) {
         Object tries = redisTemplate.opsForValue().get(tryKey);
         return tries instanceof Number number ? number.longValue() : 0L;
+    }
+
+    /**
+     * 邮箱归一化：验证码与频控的 Redis 键统一用小写去空格形式。
+     * MySQL 查库按 ci 排序规则不区分大小写，键若不归一，A@x.com 与 a@x.com 会各存一枚码、各领一套额度
+     */
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
     }
 }

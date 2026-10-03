@@ -199,7 +199,9 @@ public class AdminVisitLogService {
         }
 
         static Window of(String startDate, String endDate) {
-            LocalDate today = LocalDate.now();
+            // 「今天」锚业务时区：日志行的 created_at 按库会话的 Asia/Shanghai 落，JVM 以别的时区跑时
+            // 用默认时区取今天会把窗口整体错开数小时
+            LocalDate today = LocalDate.now(ArticleService.BUSINESS_ZONE);
             LocalDate from = parseOr(startDate, today);
             LocalDate to = parseOr(endDate, from);
             if (to.isBefore(from)) {

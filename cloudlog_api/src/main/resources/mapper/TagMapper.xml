@@ -30,6 +30,25 @@
         WHERE pt.post_id = #{postId}
     </select>
 
+    <!-- 列表页批量装配：每行带 post_id，由服务层按文章分组。顺序保证同文章内标签稳定 -->
+    <select id="findByPostIds" resultType="map">
+        SELECT pt.post_id, t.id, t.name
+        FROM post_tags pt
+        JOIN tags t ON t.id = pt.tag_id
+        WHERE pt.post_id IN
+        <foreach collection="postIds" item="postId" open="(" separator="," close=")">
+            #{postId}
+        </foreach>
+        ORDER BY pt.post_id, t.id
+    </select>
+
+    <select id="countExisting" resultType="int">
+        SELECT COUNT(*) FROM tags WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO tags (name) VALUES (#{name})
     </insert>
