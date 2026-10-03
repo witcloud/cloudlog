@@ -137,6 +137,7 @@
                 :model-value="article.content"
                 :theme="isDark ? 'dark' : 'light'"
                 code-theme="one-dark"
+                :sanitize="sanitizeHtml"
               />
             </div>
           </div>
@@ -158,6 +159,7 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 import { MdPreview } from 'md-editor-v3'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { useArticleStore } from '@/stores/article'
@@ -173,6 +175,8 @@ import EditorSettingsPanel from './components/EditorSettingsPanel.vue'
 import ImageUploadDialog from './components/ImageUploadDialog.vue'
 import LinkInsertDialog from './components/LinkInsertDialog.vue'
 import { formatMinioUrl } from '@/config'
+import { resolveTagIds } from '@/utils/articleTags'
+import { beijingNow } from '@/utils/time'
 
 const route = useRoute()
 const router = useRouter()
@@ -347,7 +351,9 @@ const handlePublish = () => {
       ElMessage.warning('请选择定时发布时间')
       return
     }
-    if (dayjs(article.publishTime).isBefore(dayjs())) {
+    // 计划时刻是北京墙钟口径（后端 Jackson 锚 GMT+8），「当前时间」也须取北京墙钟来比，
+    // 浏览器不在东八区时用本地 now 会差出时区差
+    if (dayjs(article.publishTime).isBefore(beijingNow())) {
       ElMessage.warning('定时发布时间需晚于当前时间')
       return
     }
@@ -775,8 +781,9 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
       }
     }
 
-    // 2. 构造提交数据
-    const tagIds = article.tags.filter((t) => typeof t === 'number')
+    // 2. 构造提交数据。allow-create 输入的新标签名在这里解析成 id（存在即复用、不存在即创建），
+    //    此前直接按 typeof === 'number' 过滤，输入的新标签会被静默丢弃
+    const tagIds = await resolveTagIds(article.tags)
     const submitData = {
       id: article.id,
       title: article.title,
@@ -831,8 +838,8 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
       }
     }
   } catch (error) {
+    // 失败原因由响应拦截器统一提示（业务失败与非 2xx 都会弹），此处不再重复出声
     console.error('Save failed:', error)
-    if (!isSilent) ElMessage.error('操作失败，请重试')
   } finally {
     submitting.value = false
   }

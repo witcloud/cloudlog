@@ -34,8 +34,8 @@ request.interceptors.response.use(
 
     // 统一响应契约：成功 code 恒为 200（business-model.md §5.4），其余一律按失败提示
     if (res.code !== 200) {
-      ElMessage.error(res.message || 'Error')
-      return Promise.reject(new Error(res.message || 'Error'))
+      ElMessage.error(res.message || '操作失败，请稍后重试')
+      return Promise.reject(new Error(res.message || '操作失败'))
     } else {
       return res
     }
@@ -51,7 +51,8 @@ request.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       useUserStore().logout()
       if (router.currentRoute.value.path !== '/login') {
-        router.replace('/login')
+        // 带 redirect：重新登录后回到被打断的页面，而不是落回首页丢掉全部上下文
+        router.replace({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
       }
     }
 

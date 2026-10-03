@@ -129,7 +129,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import { getTags, updateArticle } from '@/api/article'
 import { getCategories } from '@/api/category'
@@ -138,6 +138,9 @@ import type { ArticleStatus } from '@/api/types/admin'
 import { useArticleStore } from '@/stores/article'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatMinioUrl } from '@/config'
+import { resolveTagIds } from '@/utils/articleTags'
+import { beijingNow } from '@/utils/time'
+import { UPLOAD_LIMITS, isImageFile } from '@/config/upload'
 
 const articleStore = useArticleStore()
 const form = articleStore.editArticle
@@ -247,30 +250,53 @@ const publishStateLabel = computed(() => {
   return scheduledLabel.value ? `将在 ${scheduledLabel.value} 发布` : '定时发布'
 })
 
-/** 日历只允许今天起 */
-const disabledDate = (time: Date) => dayjs(time).startOf('day').isBefore(dayjs().startOf('day'))
+/** 日历只允许今天起。「今天」「当前时刻」都取北京墙钟：计划时刻按北京墙钟输入与存储，
+    浏览器不在东八区时用本地 now 会把可选窗口错开数小时 */
+const disabledDate = (time: Date) =>
+  dayjs(time).startOf('day').isBefore(beijingNow().startOf('day'))
 
-const isScheduledToday = computed(() => scheduleDate.value === dayjs().format('YYYY-MM-DD'))
+const isScheduledToday = computed(() => scheduleDate.value === beijingNow().format('YYYY-MM-DD'))
 
 /** 选今天时，小时与分钟禁选当前时刻之前 */
 const disabledHours = () =>
-  isScheduledToday.value ? Array.from({ length: dayjs().hour() }, (_, i) => i) : []
+  isScheduledToday.value ? Array.from({ length: beijingNow().hour() }, (_, i) => i) : []
 
 const disabledMinutes = (hour: number) =>
-  isScheduledToday.value && hour === dayjs().hour()
-    ? Array.from({ length: dayjs().minute() }, (_, i) => i)
+  isScheduledToday.value && hour === beijingNow().hour()
+    ? Array.from({ length: beijingNow().minute() }, (_, i) => i)
     : []
 
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
-// 封面预览地址
-const coverUrl = computed(() => {
-  if (articleStore.localCover) {
-    return URL.createObjectURL(articleStore.localCover)
+// 封面预览地址。localCover 的预览走 ObjectURL：必须在换图与卸载时 revoke，
+// computed 里每次重算都 createObjectURL 从不释放，是纯粹的内存泄漏
+const coverUrl = ref('')
+let coverObjectUrl: string | null = null
+
+watch(
+  () => articleStore.localCover,
+  (file) => {
+    if (coverObjectUrl) {
+      URL.revokeObjectURL(coverObjectUrl)
+      coverObjectUrl = null
+    }
+    if (file) {
+      coverObjectUrl = URL.createObjectURL(file)
+      coverUrl.value = coverObjectUrl
+    } else {
+      coverUrl.value = formatMinioUrl(form.cover)
+    }
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  if (coverObjectUrl) {
+    URL.revokeObjectURL(coverObjectUrl)
+    coverObjectUrl = null
   }
-  return formatMinioUrl(form.cover)
 })
 
 onMounted(async () => {
@@ -291,12 +317,19 @@ const handleFileChange = (e: Event) => {
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   if (file) {
-    if (file.size > 2 * 1024 * 1024) {
-      ElMessage.warning('封面图不能超过 2MB')
+    // accept 只是选择器提示，拖拽/改名文件可绕过，MIME 在这里显式拦
+    if (!isImageFile(file)) {
+      ElMessage.warning('封面仅支持图片文件 (jpg / png / webp)')
+      return
+    }
+    if (file.size > UPLOAD_LIMITS.cover) {
+      ElMessage.warning('封面图不能超过 5MB')
       return
     }
     articleStore.setLocalCover(file)
   }
+  // 同一张图选两次不触发 change，清掉让 input 复位
+  target.value = ''
 }
 
 /**
@@ -360,14 +393,17 @@ const handleStatusAction = async () => {
 
   submittingStatus.value = true
   try {
-    // 字段组装与编辑器提交一致，只把 status 换成本次迁移的目标态
+    // 字段组装与编辑器提交一致，只把 status 换成本次迁移的目标态。
+    // categoryId 不兜底：无分类是草稿的合法态，硬塞 id=1 是在静默污染数据；
+    // 转 published 且无分类时后端会以 400 提示补分类，那才是正确反馈。
+    // allow-create 输入的新标签名同样先解析成 id，不能在迁移时丢掉
     const res = await updateArticle(form.id, {
       id: form.id,
       title: form.title,
       content: form.content,
       cover: form.cover,
-      categoryId: form.categoryId || 1,
-      tagIds: form.tags.filter((t) => typeof t === 'number'),
+      categoryId: form.categoryId ?? null,
+      tagIds: await resolveTagIds(form.tags),
       status: action.next,
       publishTime: null,
     })

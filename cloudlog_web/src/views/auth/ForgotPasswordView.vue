@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
@@ -77,6 +77,12 @@ const loading = ref(false)
 const sendCodeLoading = ref(false)
 const countdown = ref(0)
 const resetFormRef = ref<FormInstance>()
+
+// 倒计时定时器挂组件外层引用：切路由时组件卸载，interval 得跟着停，不能空转到 0
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer)
+})
 
 const resetForm = reactive({
   email: '',
@@ -126,12 +132,15 @@ const handleSendCode = async () => {
   try {
     sendCodeLoading.value = true
     await sendResetCode(resetForm.email)
-    ElMessage.success('验证码已发送，请注意查收')
+    // 中性话术：后端对未注册邮箱静默跳过（防账号枚举），响应一律成功，这里不能替后端断言「已发送」
+    ElMessage.success('若该邮箱已注册，验证码将发送至您的邮箱')
     countdown.value = 60
-    const timer = setInterval(() => {
+    if (countdownTimer) clearInterval(countdownTimer)
+    countdownTimer = setInterval(() => {
       countdown.value--
-      if (countdown.value <= 0) {
-        clearInterval(timer)
+      if (countdown.value <= 0 && countdownTimer) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
       }
     }, 1000)
   } catch {

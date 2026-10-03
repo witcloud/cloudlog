@@ -21,7 +21,8 @@ export const useArticleStore = defineStore('article', () => {
     content: '',
     cover: '' as string | null,
     categoryId: null as number | null,
-    tags: [] as number[],
+    // number = 已有标签 id；string = allow-create 输入的新名，保存前经 resolveTagIds 解析成 id
+    tags: [] as (number | string)[],
     status: 'draft' as ArticleStatus,
     publishTime: null as string | null,
   })

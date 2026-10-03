@@ -131,11 +131,16 @@ export function deleteCategory(id: number) {
   return request.delete<unknown, Result<void>>(`/admin/categories/${id}`)
 }
 
-/* ---- 标签治理（编辑/合并/删除） ---- */
+/* ---- 标签治理（创建/编辑/合并/删除） ---- */
 
 /** 标签列表（含关联文章数） */
 export function getAdminTags() {
   return request.get<unknown, Result<AdminTagItem[]>>('/admin/tags')
+}
+
+/** 创建标签：编辑器 allow-create 输入的新标签名走这里（重名时后端返回 400） */
+export function createTag(name: string) {
+  return request.post<unknown, Result<void>>('/admin/tags', { name })
 }
 
 /** 修改标签名称 */

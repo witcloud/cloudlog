@@ -599,10 +599,13 @@ const saveProfile = async () => {
           user.occupation = occupation
 
           if (userStore.userInfo) {
-            userStore.userInfo.username = editForm.username
-            userStore.userInfo.avatar = editForm.avatar
-
-            localStorage.setItem('userInfo', JSON.stringify(userStore.userInfo))
+            // 走 store 的 updateCachedUser：缓存必须与 token 落在同一个存储，
+            // 外部直接 setItem(localStorage) 会在「未记住我」的会话里留下孤儿缓存
+            userStore.updateCachedUser({
+              ...userStore.userInfo,
+              username: editForm.username,
+              avatar: editForm.avatar,
+            })
           }
 
           editVisible.value = false
@@ -621,8 +624,7 @@ const handleAvatarSuccess = (url: string) => {
   editForm.avatar = url
 
   if (userStore.userInfo) {
-    userStore.userInfo.avatar = url
-    localStorage.setItem('userInfo', JSON.stringify(userStore.userInfo))
+    userStore.updateCachedUser({ ...userStore.userInfo, avatar: url })
   }
 }
 </script>

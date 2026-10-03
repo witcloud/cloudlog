@@ -143,7 +143,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { getArticles } from '@/api/article'
+import {getArticles, getTags} from '@/api/article'
 import { getCategories } from '@/api/category'
 import { getSiteStats } from '@/api/site'
 import type { Article, ArticleListParams, ArticleSort } from '@/api/types/article'
@@ -201,9 +201,34 @@ const sortTabs = [
 /** 筛选横幅只承载「列表之外无处可寻」的状态：分类的选中态由筛选控件自身显示 */
 const filterInfo = computed(() => {
   if (route.query.q) return { type: '搜索', value: route.query.q as string }
-  if (route.query.tag) return { type: '标签', value: route.query.tag as string }
+  // ?tag= 传的是标签名，接口只收 tagId：解析成功才展示横幅，解析失败（无此标签）不装作在过滤
+  if (route.query.tag && resolvedTagId.value != null) {
+    return { type: '标签', value: route.query.tag as string }
+  }
   return null
 })
+
+/** ?tag=（标签名）到 tagId 的解析结果：undefined=解析中，null=无此标签，number=命中 */
+const resolvedTagId = ref<number | null>()
+
+watch(
+  () => route.query.tag,
+  async (tag) => {
+    if (!tag || typeof tag !== 'string') {
+      resolvedTagId.value = undefined
+      return
+    }
+    resolvedTagId.value = undefined
+    try {
+      const { data } = await getTags()
+      const match = (data ?? []).find((t) => t.name.toLowerCase() === tag.toLowerCase())
+      resolvedTagId.value = match?.id ?? null
+    } catch {
+      resolvedTagId.value = null
+    }
+  },
+  { immediate: true },
+)
 
 /** 两个 tab 走的 SQL 分支都以 is_top DESC 打头（latest 与 recommended 都是），置顶恒在当前页头部，
  *  此处按标记切分即可，无需额外请求 */
@@ -301,7 +326,7 @@ const fetchArticles = async (append = false): Promise<boolean> => {
       pageSize: pageSize.value,
       keyword: route.query.q as string,
       categoryId: currentCategoryId.value,
-      tagId: route.query.tagId ? Number(route.query.tagId) : undefined,
+      tagId: route.query.tagId ? Number(route.query.tagId) : (resolvedTagId.value ?? undefined),
       sort: currentSort.value,
     }
     const { data } = await getArticles(params)
@@ -353,7 +378,7 @@ onUnmounted(() => {
 
 /** 筛选指纹：路由名 + 筛选参数。页码不入指纹——滚动加载会自行推进页码，
  *  入指纹等于每追加一页就触发一次整表替换 */
-const fetchKey = () => `${String(route.name)}|${JSON.stringify(route.query)}`
+const fetchKey = () => `${String(route.name)}|${JSON.stringify(route.query)}|${resolvedTagId.value ?? ''}`
 
 watch(fetchKey, (key, prevKey) => {
   // 离开首页（如去关于页）时路由名变化会触发本 watch，但不应发起请求；

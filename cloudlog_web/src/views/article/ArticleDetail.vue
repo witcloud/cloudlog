@@ -21,6 +21,7 @@
                   :theme="isDark ? 'dark' : 'light'"
                   :no-img-zoom-in="true"
                   code-theme="one-dark"
+                  :sanitize="sanitizeHtml"
                 />
         </div>
 
@@ -148,7 +149,11 @@
       </div>
 
       <div ref="commentSectionRef" class="article-detail__comments">
-        <CommentSection :post-id="article.id" :comment-count="article.comments" />
+        <CommentSection
+          :post-id="article.id"
+          :comment-count="article.comments"
+          @approved="onCommentApproved"
+        />
       </div>
     </div>
 
@@ -203,6 +208,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MdPreview } from 'md-editor-v3'
+import { sanitizeHtml } from '@/utils/sanitize'
 import 'md-editor-v3/lib/preview.css'
 import qrcode from 'qrcode-generator'
 import { setSeoMeta, canonicalUrl, toIso8601 } from '@/utils/seo'
@@ -215,6 +221,7 @@ import { ElMessage } from 'element-plus'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
 import { weiboMark, wechatMark } from '@/assets/icons/share-marks'
 import { likeArticle, unlikeArticle } from '@/api/article'
+import { ArrowLeft, ChatDotRound, Link, Share } from '@element-plus/icons-vue'
 import { followAuthor, unfollowAuthor } from '@/api/follow'
 
 // Components
@@ -574,6 +581,14 @@ const scrollToComments = () => {
 }
 
 const articleLink = computed(() => window.location.href)
+
+/** 评论区确认一条已过审评论后同步计数：详情接口的 comments 是库里的 comment_count，
+    发评成功后本地 +1，免得「评论列表多了一条、角标数字不动」直到重进页面 */
+const onCommentApproved = () => {
+  if (article.value) {
+    article.value.comments = (article.value.comments ?? 0) + 1
+  }
+}
 
 const sharePopoverRef = ref<{ hide: () => void } | null>(null)
 const shareQrVisible = ref(false)

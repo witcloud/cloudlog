@@ -1,8 +1,7 @@
 <template>
-  <div class="avatar-upload-container">
+  <div class="avatar-upload-container" ref="containerRef">
     <el-upload
       class="avatar-uploader"
-      :action="'/api/v1' + uploadPath"
       :show-file-list="false"
       :before-upload="beforeAvatarUpload"
       :http-request="handleUpload"
@@ -34,6 +33,7 @@ import request from '@/utils/request'
 import type { UploadRawFile, UploadRequestOptions } from 'element-plus'
 import type { Result } from '@/api/types/auth'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
+import { UPLOAD_LIMITS } from '@/config/upload'
 
 const props = defineProps({
   modelValue: {
@@ -66,12 +66,14 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'success'])
 const loading = ref(false)
+const containerRef = ref<HTMLElement | null>(null)
 
-// 模拟点击触发上传
+// 模拟点击触发上传。必须在组件实例内找 input：全局 querySelector 会在
+// 页面同时渲染多个实例（个人页 + 编辑弹窗）时点错别人的文件框
 const triggerUpload = () => {
-  const uploadInput = document.querySelector(
-    '.avatar-uploader input[type="file"]',
-  ) as HTMLInputElement
+  const uploadInput = containerRef.value?.querySelector(
+    'input[type="file"]',
+  ) as HTMLInputElement | null
   if (uploadInput) {
     uploadInput.click()
   }
@@ -83,7 +85,7 @@ const beforeAvatarUpload = (rawFile: UploadRawFile) => {
   if (!allowedTypes.includes(rawFile.type)) {
     ElMessage.error('头像只能是 JPG/PNG/GIF/WEBP 格式!')
     return false
-  } else if (rawFile.size / 1024 / 1024 > 10) {
+  } else if (rawFile.size > UPLOAD_LIMITS.avatar) {
     ElMessage.error('头像大小不能超过 10MB!')
     return false
   }
@@ -102,6 +104,8 @@ const handleUpload = async (options: UploadRequestOptions) => {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      // 全局 10s 对大图弱网上传偏紧，上传请求单独放宽
+      timeout: 60000,
     })
 
     if (res.code === 200) {

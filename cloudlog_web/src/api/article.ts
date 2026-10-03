@@ -121,6 +121,8 @@ export function uploadArticleImage(file: File) {
   formData.append('file', file)
   return request.post<unknown, Result<string>>('/upload/article-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    // 全局 10s 对大图弱网上传偏紧，上传请求单独放宽
+    timeout: 60000,
   })
 }
 
@@ -133,6 +135,7 @@ export function uploadCoverImage(file: File) {
   formData.append('file', file)
   return request.post<unknown, Result<string>>('/upload/cover-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
   })
 }
 

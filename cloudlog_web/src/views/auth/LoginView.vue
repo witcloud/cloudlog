@@ -82,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
@@ -97,6 +97,12 @@ const loading = ref(false)
 const sendCodeLoading = ref(false)
 const countdown = ref(0)
 const authFormRef = ref<FormInstance>()
+
+// 倒计时定时器挂组件外层引用：切路由时组件卸载，interval 得跟着停，不能空转到 0
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer)
+})
 
 const isLogin = computed(() => route.name === 'Login')
 
@@ -171,10 +177,12 @@ const handleSendCode = async () => {
     await sendCode(authForm.email)
     ElMessage.success('验证码已发送，请注意查收')
     countdown.value = 60
-    const timer = setInterval(() => {
+    if (countdownTimer) clearInterval(countdownTimer)
+    countdownTimer = setInterval(() => {
       countdown.value--
-      if (countdown.value <= 0) {
-        clearInterval(timer)
+      if (countdown.value <= 0 && countdownTimer) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
       }
     }, 1000)
   } catch {

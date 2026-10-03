@@ -1,5 +1,6 @@
 import dayjs from 'dayjs'
 import { useSiteStore } from '@/stores/site'
+import { parseBeijingTime } from '@/utils/time'
 
 /**
  * 页面标题的唯一拼法：带页面名时挂站点名后缀，不带时只留站点名。
@@ -79,9 +80,11 @@ const upsertCanonical = (href: string) => {
 
 /**
  * 后端下发的时刻是 "yyyy-MM-dd HH:mm:ss"（GMT+8），而 article:published_time 与 JSON-LD 的
- * datePublished 要的是 ISO 8601。meta 与脚本两处换算必须同一个函数，否则同页两个时刻
+ * datePublished 要的是 ISO 8601。meta 与脚本两处换算必须同一个函数，否则同页两个时刻。
+ * 解析必须显式挂 +08:00：dayjs 裸解析按浏览器本地时区解释，海外访客的 published_time 会整体偏移
  */
-export const toIso8601 = (moment: string) => dayjs(moment).toISOString()
+export const toIso8601 = (moment: string) =>
+  (parseBeijingTime(moment) ?? dayjs(moment)).toISOString()
 
 /**
  * 写这一页的 SEO 元信息。

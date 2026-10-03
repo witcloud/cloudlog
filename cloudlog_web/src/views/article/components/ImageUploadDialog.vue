@@ -133,12 +133,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { uploadArticleImage } from '@/api/article'
+import { UPLOAD_LIMITS } from '@/config/upload'
 import { formatMinioUrl } from '@/config'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void; (e: 'confirm', markdown: string): void }>()
 
-const MAX_SIZE = 5 * 1024 * 1024
+// 与封面/头像共用同一份上限口径（config/upload.ts）
+const MAX_SIZE = UPLOAD_LIMITS.articleImage
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 
 const tab = ref<'upload' | 'link'>('upload')

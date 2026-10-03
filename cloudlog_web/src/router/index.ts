@@ -208,7 +208,8 @@ router.beforeEach(async (to) => {
   const userStore = useUserStore()
   const isLoggedIn = !!userStore.token
   if (to.meta.requiresAuth && !isLoggedIn) {
-    return '/login'
+    // 带 redirect：登录页登录成功后回到原目标（LoginView 的 goAfterLogin 只认站内路径）
+    return { path: '/login', query: { redirect: to.fullPath } }
   }
 
   // Role guard：声明了 role 的路由仅对应角色可进入（如 /admin 仅管理员）

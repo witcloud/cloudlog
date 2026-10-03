@@ -70,6 +70,7 @@ function vditorLocalCdn(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // 注：rolldown 内核的 vite 8 已移除 esbuild.drop 选项，生产剥 console 暂不具备条件，保持默认
 
   return {
     plugins: [vue(), vueDevTools(), vditorLocalCdn()],

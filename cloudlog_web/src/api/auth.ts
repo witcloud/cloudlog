@@ -28,6 +28,14 @@ export function login(data: LoginRequest) {
 }
 
 /**
+ * 登出：服务端把该账号的失效水位推到此刻，作废该账号全部在存 token。
+ * 幂等：未登录（上下文匿名）调用同样返回成功
+ */
+export function logout() {
+  return request.post<unknown, Result<void>>('/auth/logout')
+}
+
+/**
  * 发送重置密码验证码
  * @param email 账号邮箱
  */

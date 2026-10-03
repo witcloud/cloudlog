@@ -143,6 +143,9 @@ const props = defineProps<{
   commentCount: number
 }>()
 
+/** 已过审评论落库后通知父级：文章页的评论计数（标题旁与悬浮角标）要同步 +1 */
+const emit = defineEmits<{ approved: [] }>()
+
 /** 根评论 + 其直接回复；回复不带子级，保证展示只有两级 */
 interface Thread extends Comment {
   replies: Comment[]
@@ -242,6 +245,7 @@ const submitComment = async (parentId = 0) => {
     if (res.data === 'approved') {
       ElMessage.success('评论已发布。')
       await loadComments()
+      emit('approved')
     } else {
       ElMessage.info('评论已提交，审核通过后展示。')
     }
