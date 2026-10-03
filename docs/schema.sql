@@ -85,6 +85,7 @@ CREATE TABLE `comments` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '评论时间',
   PRIMARY KEY (`id`),
   KEY `idx_post_id` (`post_id`),
+  KEY `idx_user` (`user_id`),
   KEY `idx_status_time` (`status`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文章评论表';
 
@@ -95,7 +96,8 @@ CREATE TABLE `likes` (
   `user_id` BIGINT NOT NULL COMMENT '用户ID（雪花 ID）',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '点赞时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_post_user` (`post_id`, `user_id`)
+  UNIQUE KEY `uk_post_user` (`post_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文章点赞表';
 
 -- 8. （空位）SEO 信息表 seo_meta 已于 2026-10-03 下线删除：详情页的 SEO 三元组改由服务端
@@ -129,7 +131,8 @@ CREATE TABLE `follows` (
   `follower_id` BIGINT NOT NULL COMMENT '关注者用户ID（雪花 ID）',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '关注时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_author_follower` (`author_id`, `follower_id`)
+  UNIQUE KEY `uk_author_follower` (`author_id`, `follower_id`),
+  KEY `idx_follower` (`follower_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户关注关系表';
 
 -- 12. 评论违禁词库表

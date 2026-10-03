@@ -487,12 +487,13 @@
 
 - **JWT subject 是邮箱，不是用户 id**。因此 `users.email` 的 UNIQUE 兼具冲突判据作用，且修改邮箱后旧 token 的 subject 再也查不到用户 → **改邮箱必须强制重新登录**。不改 subject（会让全站现存 token 一次性失效）。
 - 评论的 `user_id` **只由服务端从安全上下文回填**，请求体携带的值一律覆盖；查不到对应用户时拒绝写入。生成接口时不要留「客户端可传 user_id」的口子。
-- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`，键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`）：
+- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`，键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**2026-10-03 增量：所有含 `{email}` 的键统一用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §6 增量记录）：
   - 码值键 `auth:code:{email}`（注册）、`auth:code-change:{email}`（改邮箱）、`auth:code-reset:{email}`（重置口令）：TTL 5min、一次性消费，命中即删。
-  - 发码频控键 `auth:code-limit:{purpose}:{email}`（TTL 60s）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00），频控口径见 business-model.md §3.2。
+  - 发码频控键 `auth:code-limit:{purpose}:{email}`（TTL 60s）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00），频控口径见 business-model.md §3.2。**2026-10-03 增量**：另加两层兜底日额度——`auth:code-ip-daily:{客户端地址}`（每来源地址每日 30 次）与 `auth:code-global-daily`（全站每日 500 次），堵「持邮箱列表绕开邮箱维度发码」的邮件轰炸口子。
   - 防穷举计数键 `auth:code-try:{purpose}:{email}`：首错时设 TTL 5min（与码值键同寿），错满 5 次连带删掉码值键，校验成功时删除。按用途分键，注册码错满不牵连改邮箱码。
   - 登录防爆破计数键 `auth:login-fail:{email}:{客户端地址}`：`INCR` 计数，首错设 TTL 15min，计满 5 次那一下把窗口重新拉满，登录成功即删键。地址口径与阅读去重同源（`X-Forwarded-For` 首值优先，无该头取 `remoteAddr`），二者共用 `IpUtils.clientIp()`。
-  - token 失效水位键 `auth:token-epoch:{email}`：值为置位时刻的秒级时间戳，TTL = token 有效期（7 天——那之前签发的 token 早已自然过期）。`iat` 早于水位的 token 按未登录处理，见 §5.1。
+  - token 失效水位键 `auth:token-epoch:{email}`：值为置位时刻的秒级时间戳，TTL = token 有效期（7 天——那之前签发的 token 早已自然过期）。`iat` 早于水位的 token 按未登录处理，见 §5.1。**2026-10-03 增量**：置位点从「口令的两处写入」扩为三处——新增登出 `POST /auth/logout` 同样推水位（作废该账号全部在存 token）。
+  - **2026-10-03 增量（上传额度）**：`upload:daily:{userId}`（TTL 24h）按用户计当日上传次数，上限 100 次，计满后 `/upload/*` 全部端点拒绝转存。
 
 ### 5.5 URL 存储的既有事实（重要）
 

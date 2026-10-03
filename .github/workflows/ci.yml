@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: cloudlog
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7
+        command: ["redis-server", "--requirepass", "redis123"]
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli -a redis123 ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      # application.yml 不入库：先从 example 复制一份占位配置，再凭据经环境变量覆盖指向 CI 的服务容器；
+      # SMTP 只被 mock，不会外发邮件
+      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_DATA_REDIS_HOST: 127.0.0.1
+      SPRING_DATA_REDIS_PASSWORD: redis123
+      JWT_SECRET: ci_only_jwt_secret_key_0123456789_abcdefghijklmnop
+    steps:
+      - uses: actions/checkout@v4
+      - name: 生成 application.yml（CI 专用，不入库）
+        run: cp cloudlog_api/src/main/resources/application.example.yml cloudlog_api/src/main/resources/application.yml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: 测试
+        working-directory: cloudlog_api
+        run: mvn -B test
+
+  frontend:
+    name: 前端类型检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudlog_web/package-lock.json
+      - name: 安装依赖
+        working-directory: cloudlog_web
+        run: npm ci
+      - name: 类型检查与构建
+        working-directory: cloudlog_web
+        run: npm run build

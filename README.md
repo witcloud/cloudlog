@@ -133,3 +133,28 @@ java -jar target/*.jar --spring.profiles.active=prod
 ```
 
 未指定 profile 时走默认配置，接口文档与 actuator 端点保持开放，收紧只在 `prod` 下生效。
+
+## 数据备份（必做）
+
+文章内容只存在于 MySQL，`LogRetentionService` 只负责清日志、不负责备数据——库损坏或误删等于内容全失。至少按天做一次逻辑备份：
+
+```bash
+# 手动备份（保留 14 天滚动）
+mkdir -p /var/backups/cloudlog
+mysqldump -u root -p'你的数据库密码' --single-transaction --routines cloudlog \
+  | gzip > /var/backups/cloudlog/cloudlog-$(date +%F).sql.gz
+find /var/backups/cloudlog -name '*.sql.gz' -mtime +14 -delete
+```
+
+把这两行挂进 crontab（每天 02:30，避开 03:30 的日志清理任务）：
+
+```cron
+30 2 * * * mysqldump -u root -p'你的数据库密码' --single-transaction cloudlog | gzip > /var/backups/cloudlog/cloudlog-$(date +\%F).sql.gz
+30 2 * * * find /var/backups/cloudlog -name '*.sql.gz' -mtime +14 -delete
+```
+
+`--single-transaction` 保证 InnoDB 下备份不锁表；恢复：`gunzip < 备份文件 | mysql -u root -p cloudlog`。MinIO 里的图片建议按 bucket 周期快照或双桶镜像，量小可接受时也可与 `mysqldump` 同频用 `mc mirror` 同步。
+
+## 持续集成
+
+`.github/workflows/ci.yml` 在每次 push/PR 时跑两件事：后端全量测试（临时 MySQL + Redis 服务容器，凭据经环境变量覆盖）、前端 type-check 与构建。合并前绿灯是硬门槛——本仓有 300+ 后端测试，本地跑一遍不便宜，交给 CI 兜底。
