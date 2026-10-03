@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.BannedWordMapper">
+
+    <!-- 机审取词：按 id 升序，让「首个命中词」等于「最早添加的命中词」，跨请求稳定 -->
+    <select id="findEnabled" resultType="com.ayun.entity.BannedWord">
+        SELECT * FROM banned_words WHERE is_enabled = 1 ORDER BY id
+    </select>
+
+    <!-- 词面本身就常带 % 和 _（词库里出现「100%」这类词是要按字面量匹配的），
+         转义顺序与 ESCAPE 口径同 PostMapper 的 escapedKeyword -->
+    <sql id="escapedKeyword">
+        REPLACE(REPLACE(REPLACE(#{keyword}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+    </sql>
+
+    <!-- created_at 只到秒，批量导入会让一批词同秒入库，故用 id 兜住次序，翻页才不重不漏 -->
+    <select id="findAdminList" resultType="com.ayun.entity.BannedWord">
+        SELECT * FROM banned_words
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND word LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+            </if>
+        </where>
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+    <select id="findById" resultType="com.ayun.entity.BannedWord">
+        SELECT * FROM banned_words WHERE id = #{id}
+    </select>
+
+    <select id="findByWord" resultType="com.ayun.entity.BannedWord">
+        SELECT * FROM banned_words WHERE word = #{word}
+    </select>
+
+    <insert id="insert">
+        INSERT INTO banned_words (word, action) VALUES (#{word}, #{action})
+    </insert>
+
+    <!-- 去重靠 uk_word 而不是先查后插：INSERT IGNORE 让重复词静默跳过，返回行数即真正入库数。
+         与 follows 的幂等关注同一套路（db-design.md §2.11）。词长超 50 的行由服务层先挡掉，
+         否则 IGNORE 会把截断也一起吞成警告 -->
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO banned_words (word, action)
+        VALUES
+        <foreach collection="words" item="item" separator=",">
+            (#{item}, #{action})
+        </foreach>
+    </insert>
+
+    <update id="updateEnabled">
+        UPDATE banned_words SET is_enabled = #{isEnabled} WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM banned_words WHERE id = #{id}
+    </delete>
+</mapper>

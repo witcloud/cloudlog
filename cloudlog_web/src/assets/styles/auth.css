@@ -1,0 +1,98 @@
+/* 认证页族（登录 / 注册 / 找回密码）共用的外壳。
+   与 global.css 同理走全局而非 scoped：三个视图共享同一套命名，复制进各自的 <style scoped> 会立刻分叉。
+   泛用名一律带 auth- 前缀，避免污染全局选择器空间。语义见 ui-design.md §3.5、§6.2 */
+.auth-view {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--space-xl);
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 24rem;
+}
+
+.auth-head {
+  margin-bottom: var(--space-xl);
+}
+
+.auth-head__title {
+  font-size: var(--text-lg);
+}
+
+.auth-head__sub {
+  margin-top: var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--color-ink-3);
+}
+
+.auth-brand {
+  display: inline-flex;
+  margin-bottom: var(--space-lg);
+  font-size: var(--text-md);
+  color: var(--color-ink);
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.auth-brand:hover {
+  color: var(--color-accent);
+}
+
+.auth-code-input {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.auth-code-input .el-input {
+  flex: 1;
+}
+
+.auth-code-input .el-button {
+  width: 7.5rem;
+  flex-shrink: 0;
+}
+
+.auth-form-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-lg);
+}
+
+.auth-submit {
+  width: 100%;
+  height: 2.75rem;
+  margin-top: var(--space-sm);
+}
+
+.auth-foot {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-rule);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-ink-3);
+}
+
+/* 页脚的模式切换：登录 ↔ 注册、找回密码 → 登录 */
+.auth-foot__switch {
+  margin-left: var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.auth-foot__switch:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+/* 表单区内的纯文本链接（「找回密码？」），与页脚切换同一档 */
+.auth-link {
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.auth-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}

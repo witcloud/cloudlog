@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.FollowMapper">
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT IGNORE INTO follows (author_id, follower_id)
+        VALUES (#{authorId}, #{followerId})
+    </insert>
+
+    <select id="existsByAuthorAndFollower" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1 FROM follows WHERE author_id = #{authorId} AND follower_id = #{followerId}
+        )
+    </select>
+
+    <delete id="delete">
+        DELETE FROM follows WHERE author_id = #{authorId} AND follower_id = #{followerId}
+    </delete>
+
+    <select id="countByAuthor" resultType="int">
+        SELECT COUNT(*) FROM follows WHERE author_id = #{authorId}
+    </select>
+
+    <select id="countByFollower" resultType="int">
+        SELECT COUNT(*) FROM follows WHERE follower_id = #{followerId}
+    </select>
+
+    <!-- 两条列表只取简要字段：邮箱、角色、启停状态不外泄给前台 -->
+    <select id="findFollowing" resultType="com.ayun.model.vo.UserBriefVO">
+        SELECT u.id, u.username, u.avatar, u.bio, u.occupation
+        FROM follows f
+        JOIN users u ON u.id = f.author_id
+        WHERE f.follower_id = #{followerId}
+        ORDER BY f.created_at DESC
+    </select>
+
+    <select id="findFollowers" resultType="com.ayun.model.vo.UserBriefVO">
+        SELECT u.id, u.username, u.avatar, u.bio, u.occupation
+        FROM follows f
+        JOIN users u ON u.id = f.follower_id
+        WHERE f.author_id = #{authorId}
+        ORDER BY f.created_at DESC
+    </select>
+
+    <!-- 作者主页两栏的关注标注：两个方向各一次批量查，id 集合来自当页行，最多 20 个 -->
+    <select id="findFollowedAmong" resultType="long">
+        SELECT author_id FROM follows
+        WHERE follower_id = #{followerId} AND author_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </select>
+
+    <select id="findFollowingMeAmong" resultType="long">
+        SELECT follower_id FROM follows
+        WHERE author_id = #{authorId} AND follower_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </select>
+</mapper>

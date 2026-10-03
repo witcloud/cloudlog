@@ -1,0 +1,447 @@
+/* 全局基础样式：字号、正文节奏、焦点环、路由过渡、Markdown 阅读排版。
+ * 页面与组件自身的样式写在各自 .vue 的 <style scoped> 中。
+ */
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.75;
+  color: var(--color-ink);
+  background-color: var(--color-paper);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1.35;
+  color: var(--color-ink);
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-paper-2);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Element Plus 表单聚焦态与发丝线体系统一：
+   聚焦 = 边框加深为墨色，而不是整圈变成强调色 */
+.el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--color-rule) inset;
+}
+
+.el-select__wrapper.is-hovering {
+  box-shadow: 0 0 0 1px var(--color-rule-strong) inset;
+}
+
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--color-ink) inset;
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--color-ink) inset;
+}
+
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--color-ink) inset;
+}
+
+/* Element Plus 内层真实输入由外层 wrapper 表达聚焦态，
+   不再叠加全局焦点环（否则多选标签等会出现双重边框） */
+.el-select__input:focus,
+.el-select__input:focus-visible,
+.el-input__inner:focus,
+.el-input__inner:focus-visible,
+.el-textarea__inner:focus-visible {
+  outline: none;
+}
+
+/* 为滚动条始终预留位置：避免长短页面间切换（如首页↔少文章分类）时布局跳动 */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* 弹层锁滚动时 Element Plus 会给 body 内联 width: calc(100% - 15px) 补回消失的滚动条；
+   但 stable 已把槽位常驻（锁定时 html.clientWidth 不变），这笔补偿成了二次扣减，
+   居中容器因此左移半个滚动条宽。用 !important 压掉内联值，保留 overflow 锁定。 */
+body.el-popup-parent--hidden {
+  width: 100% !important;
+}
+
+/* Element Plus 的锁滚动只作用于 body，而 reset.css 给 html 设了 overflow-x: clip；
+   根元素 overflow 非 visible 时 body 的值不再向视口传播，锁定因此落空（弹窗内滚轮会带动页面）。
+   锁必须落在 html 上；overflow-y 单轴设置，保留 html 原有的 clip 横向裁切。 */
+html:has(body.el-popup-parent--hidden) {
+  overflow-y: hidden;
+}
+
+/* 路由切换：只对新页面淡入，旧页面即时移除。
+   out-in 的双向淡出会在页面之间留出一段纸色空白，观感为「闪屏」 */
+.fade-enter-active {
+  transition: opacity 150ms var(--ease-out);
+}
+
+.fade-enter-from {
+  opacity: 0;
+}
+
+/* 路由进度条：沿用 nprogress 的 CSS，只把它的默认蓝换成强调色；
+   右端 peg 是旋转 3° 的光晕，与全站发丝线语言无关，直接不渲染 */
+#nprogress .bar {
+  background: var(--color-accent);
+}
+
+#nprogress .peg {
+  display: none;
+}
+
+/* Markdown 阅读排版（md-editor-v3 预览容器）
+ *
+ * 两件事必须同时做，缺一条样式就不生效：
+ * 1) 色板：库自带 default-theme 一套 GitHub 色（#fff/#e6e6e6/#2d8cf0/#35b378/#fafafa…），
+ *    是第二套配色（§6.6.2）。按 §6.3 把本站 Token 赋给第三方变量，一处生效、暗色自动跟。
+ * 2) 特异性：preview.css 由详情页这个懒加载路由 import，注入时刻**晚于** global.css，
+ *    同特异性的规则全部输给它（含库自己的 div.default-theme p 一档）。
+ *    所以本段一律走 .md-editor.md-editor-previewOnly .md-editor-preview（0,3,0）前缀，
+ *    压过 .md-editor div.default-theme（0,2,1）与 div.default-theme p（0,1,1）。 */
+
+.md-editor.md-editor-previewOnly {
+  /* 预览容器坐在纸面上，自身不再带底色（md-editor 默认亮白/暗黑） */
+  background: transparent;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview {
+  /* ---- 库色板 → 本站 Token ---- */
+  --md-color: var(--color-ink-2);
+  --md-hover-color: var(--color-ink);
+  --md-bk-color: transparent;
+  --md-bk-color-outstand: var(--color-paper-3);
+  --md-bk-hover-color: var(--color-paper-3);
+  --md-border-color: var(--color-rule);
+  --md-border-hover-color: var(--color-rule-strong);
+  --md-border-active-color: var(--color-ink);
+  --md-scrollbar-bg-color: var(--color-paper-3);
+  --md-scrollbar-thumb-color: var(--color-rule-strong);
+  --md-scrollbar-thumb-hover-color: var(--color-ink-4);
+  --md-scrollbar-thumb-active-color: var(--color-ink-3);
+
+  --md-theme-color: var(--color-ink-2);
+  --md-theme-color-reverse: var(--color-paper-2);
+  /* 表格行悬停：正文表格是纯展示件，§5.2 明确不加悬停玩法 */
+  --md-theme-color-hover: transparent;
+  --md-theme-color-hover-inset: var(--color-paper-3);
+  --md-theme-link-color: var(--color-accent);
+  --md-theme-link-hover-color: var(--color-accent-ink);
+  --md-theme-border-color: var(--color-rule);
+  --md-theme-border-color-reverse: var(--color-rule-strong);
+  --md-theme-border-color-inset: var(--color-rule);
+  --md-theme-bg-color: transparent;
+  --md-theme-bg-color-inset: var(--color-paper-3);
+  --md-theme-code-inline-color: var(--color-ink);
+  --md-theme-code-inline-bg-color: var(--color-paper-3);
+  --md-theme-quote-color: var(--color-ink-3);
+  --md-theme-quote-border: 2px solid var(--color-rule-strong);
+  --md-theme-quote-bg-color: transparent;
+  /* 分层靠发丝线 + 表头底色微差，不靠斑马纹（§4.4） */
+  --md-theme-table-stripe-color: transparent;
+  --md-theme-table-tr-bg-color: transparent;
+  --md-theme-table-td-border-color: var(--color-rule);
+  --md-theme-radius-s: var(--radius-xs);
+  --md-theme-radius-m: var(--radius-sm);
+  /* 代码块保持 One Dark，全站一套、不随主题换（§4.2）——上面两行不动 code-block 色 */
+
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  /* 1.75 与 body 同一档：原先这里写 1.85，是本轮抬特异性之前从未生效的死值，
+     生效后每行多出 4px leading，短行之间的空带被显著放大 */
+  line-height: 1.75;
+  color: var(--color-ink-2);
+  background: transparent;
+
+  /* 库给的是 word-break: break-all，会在英文单词中间硬断行；
+     断词策略交回 reset.css 的 overflow-wrap: break-word */
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* ---- 标题 ---- *
+ * 正文标题在渲染后整体下移一级（`#` → h2，页面大标题独占 h1，见 ArticleDetail.vue
+ * demoteBodyHeadings），所以档位比 Markdown 层级低一格：编辑器里 hN = 这里 hN+1。
+ * h1 规则保留是给未下移的兜底。 */
+.md-editor.md-editor-previewOnly .md-editor-preview :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1.35;
+  color: var(--color-ink);
+  word-break: normal;
+  /* 上方 24 与引用/代码/表格/图同一档（块级分离），下方 12 让标题贴住自己那段文字——
+     层级靠这组不对称 + 字号差承载，不靠把上方拉到 40 */
+  margin: var(--space-lg) 0 var(--space-sm);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview :is(h1, h2) {
+  font-size: var(--text-xl);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview h3 {
+  font-size: var(--text-lg);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview h4 {
+  font-size: var(--text-md);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview h5 {
+  font-size: var(--text-base);
+}
+
+/* 库默认 h6 = 0.85em = 13.6px，比正文还小一档；补回字阶并降到辅助墨色 */
+.md-editor.md-editor-previewOnly .md-editor-preview h6 {
+  font-size: var(--text-sm);
+  color: var(--color-ink-3);
+}
+
+/* 预览容器是 flow-root，首/末块边距折不出容器，会与文章头/标签行各叠成两段 */
+.md-editor.md-editor-previewOnly .md-editor-preview > :first-child {
+  margin-top: 0;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---- 段落 ---- *
+ * line-height 要显式继承：库的 div.default-theme p / li 各写了一份 1.6，
+ * 不写 inherit 的话容器那一档落不到它们身上。
+ * 段距取 --space-sm 而非 --space-md：正文行盒本身已带 leading，
+ * 两档叠加后短段之间的空带读起来明显大于实际值。 */
+.md-editor.md-editor-previewOnly .md-editor-preview p {
+  margin: var(--space-sm) 0;
+  line-height: inherit;
+}
+
+/* ---- 列表 ---- *
+ * reset.css 全站清掉了 list-style，库只补回 padding 没补回标记，
+ * 所以此前阅读页的列表是「缩进两格、没有圆点也没有序号」。 */
+.md-editor.md-editor-previewOnly .md-editor-preview :is(ul, ol) {
+  margin: var(--space-sm) 0;
+  padding-inline-start: var(--space-lg);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview ul {
+  list-style-type: disc;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview ul ul {
+  list-style-type: circle;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview ul ul ul {
+  list-style-type: square;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview ol {
+  list-style-type: decimal;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview li {
+  margin: var(--space-2xs) 0;
+  line-height: inherit;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview li > :is(ul, ol) {
+  margin: var(--space-2xs) 0;
+}
+
+/* ---- 引用 ---- */
+.md-editor.md-editor-previewOnly .md-editor-preview blockquote {
+  display: flow-root;
+  margin: var(--space-lg) 0;
+  padding: 0 var(--space-md);
+  border-inline-start: 2px solid var(--color-rule-strong);
+  background-color: transparent;
+  color: var(--color-ink-3);
+  line-height: inherit;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview blockquote > :first-child {
+  margin-top: 0;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---- 分隔线 ---- *
+ * 与块级分离那一档同高（24）：它和引用、代码块是同一类「换了一块内容」的信号，
+ * 不需要比它们更重 */
+.md-editor.md-editor-previewOnly .md-editor-preview hr {
+  height: 0;
+  margin: var(--space-lg) 0;
+  border: none;
+  border-block-start: 1px solid var(--color-rule);
+  background: none;
+}
+
+/* ---- 链接 ---- *
+ * 库的 div.default-theme a 是 inline-flex + line-height:1，会把链接从基线上抬走 */
+.md-editor.md-editor-previewOnly .md-editor-preview a {
+  display: inline;
+  line-height: inherit;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  border-block-end: none;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview a:hover {
+  color: var(--color-accent-ink);
+}
+
+/* ---- 行内代码 ---- */
+.md-editor.md-editor-previewOnly .md-editor-preview :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  line-height: 1;
+  color: var(--color-ink);
+  background-color: var(--color-paper-3);
+  border-radius: var(--radius-xs);
+  padding: var(--space-3xs) var(--space-2xs);
+}
+
+/* ---- 代码块 ---- *
+ * 块体本身吃 One Dark（§4.2），本站只管外边距、字号档位与圆角。 */
+.md-editor.md-editor-previewOnly .md-editor-preview .md-editor-code {
+  margin: var(--space-lg) 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-ink-2);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview .md-editor-code pre {
+  margin: 0;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview .md-editor-code pre code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  padding: var(--space-md);
+}
+
+/* md-editor-v3 的代码头默认 position:sticky + z-index:10000，滚动时会
+   压在站点吸顶导航上方；改为随代码块正常滚动。 */
+.md-editor.md-editor-previewOnly .md-editor-preview .md-editor-code .md-editor-code-head {
+  position: static;
+}
+
+/* 代码头左侧三枚红黄绿圆点是仿 macOS 窗口的纯装饰，且是第二套配色（§6.6.2）。
+   只收圆点，不动 .md-editor-code-flag 本身——多语言代码块的分栏标签挂在它下面。
+   选择器要一路跟到 code-head：库那条是 5 个类，少一级就压不过。 */
+.md-editor.md-editor-previewOnly
+  .md-editor-preview
+  .md-editor-code
+  .md-editor-code-head
+  .md-editor-code-flag
+  > span {
+  display: none;
+}
+
+/* ---- 表格 ---- *
+ * 库不设 width，表格按内容收缩（实测 172px），且 #e6e6e6 边 + #fafafa 斑马 +
+   hover 转 #eee 全是第二套色。分层改走发丝线 + 表头底色微差。 */
+.md-editor.md-editor-previewOnly .md-editor-preview table {
+  width: 100%;
+  margin: var(--space-lg) 0;
+  border-collapse: collapse;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview :is(th, td) {
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-rule);
+  color: var(--color-ink-2);
+  text-align: left;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview th {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--color-ink);
+  background-color: var(--color-paper-3);
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview tbody tr {
+  background-color: transparent;
+}
+
+/* ---- 图片 ---- *
+ * 空带统一 15：图片自带 --space-sm，贴在段落边缘的那一侧让位给段落自己的边距，
+ * 否则两段叠成 27。库的 markdown-it-image-figures 会把独占一行的图片从 p 提成 figure，
+ * 它自带 1em 下边距且是 inline-flex（边距不折叠、与相邻段落相加），一并收掉。
+ * display 要显式改回 inline-block：reset.css 的 img{display:block} 一旦落在段落里，
+ * 块级图片把行内上下文劈成两段，紧跟的 <br>（breaks 生成）就留下一个空行盒——
+ * 实测下方 43 而上方只有 15。行内块让 <br> 回到它本来的职责：换行。
+ * 宽高都留 auto 再加 max-height：只限宽时竖图按比例仍能高过一屏，整页被一张图占满。
+ * 两条 max 同时生效时浏览器按原比例取更小的那一档，所以是等比缩小、不裁切；
+ * 代价是竖图会变窄，被限高命中的图靠居中（见下方 figure）落回栏中，完整画面点灯箱看。 */
+.md-editor.md-editor-previewOnly .md-editor-preview img {
+  display: inline-block;
+  vertical-align: bottom;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: var(--figure-max-h);
+  margin: var(--space-sm) 0;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+
+/* 库给独占一行的图片套的是 inline-flex + text-align:center + 1em 下边距：
+   inline 级会在图下多出一条基线缝（实测下带 22），边距也不与相邻段落折叠。
+   改成块级、清掉自带边距后，它与「图片贴在段里」那一档走同一套折叠结果。
+   text-align 保留居中：被 max-height 收窄的图贴着栏边像版式出错，两侧留白均分才对；
+   与正文混排的行内图片不在 figure 里，仍随文本左对齐。 */
+.md-editor.md-editor-previewOnly .md-editor-preview figure {
+  display: block;
+  margin: 0;
+  text-align: center;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview img:first-child {
+  margin-block-start: 0;
+}
+
+.md-editor.md-editor-previewOnly .md-editor-preview img:last-child {
+  margin-block-end: 0;
+}
+
+
+/* 数字列对齐：日期、计数、排名 */
+.tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 150ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 150ms !important;
+    scroll-behavior: auto !important;
+  }
+}

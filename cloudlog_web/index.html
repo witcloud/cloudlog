@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="CloudLog — 一个关于前端技术的个人博客，记录学习心得与项目实践。"
+    />
+    <title>CloudLog</title>
+    <!-- SEO 的两处站点级默认值都在这个文件里，别在脚本里重抄第二份：
+         上面那行 description 由 src/utils/seo.ts 在加载时读一次，路由离开文章页时写回它；
+         apple-touch-icon.png 是 og:image 的兜底图（文章没有封面时社交卡片用这张）。
+         运行时的 og:* / twitter:* / canonical / JSON-LD 全部由 seo.ts 注入，这里不预置——
+         静态与运行时两份同时存在，复位逻辑就分不清「本来就有」还是「上一篇留下的」 -->
+    <script>
+      // 首帧前落定主题，避免暗色闪白（与 useTheme.ts 的存储键保持一致）
+      try {
+        var stored = localStorage.getItem('cloudlog-theme')
+        var dark =
+          stored === 'dark' ||
+          (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

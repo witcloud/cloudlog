@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="默认头像">
+  <!-- 兜底头像：透明底 + 占位墨色 #78746e（≈ oklch(56% 0.01 76)），
+       在浅色与暗色的头像盘（color-paper-3）上均可辨。
+       外链 SVG 读不到页面 CSS 变量，所以颜色只能写死。 -->
+  <g fill="none" stroke="#78746e" stroke-width="3.5" stroke-linecap="round">
+    <circle cx="32" cy="25" r="9.5" />
+    <path d="M14.5 50.5c3.6-8.2 9.9-12.3 17.5-12.3s13.9 4.1 17.5 12.3" />
+  </g>
+</svg>

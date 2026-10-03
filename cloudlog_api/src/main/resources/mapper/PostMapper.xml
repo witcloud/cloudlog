@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.PostMapper">
+    <resultMap id="PostResultMap" type="com.ayun.entity.Post">
+        <id property="id" column="id"/>
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="excerpt" column="excerpt"/>
+        <result property="cover" column="cover"/>
+        <result property="authorId" column="author_id"/>
+        <result property="categoryId" column="category_id"/>
+        <result property="status" column="status"/>
+        <result property="isTop" column="is_top"/>
+        <result property="topOrder" column="top_order"/>
+        <result property="viewCount" column="view_count"/>
+        <result property="likeCount" column="like_count"/>
+        <result property="commentCount" column="comment_count"/>
+        <result property="publishedAt" column="published_at"/>
+        <result property="offlinedBy" column="offlined_by"/>
+        <result property="offlinedAt" column="offlined_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <association property="author" javaType="com.ayun.entity.User">
+            <id property="id" column="author_id"/>
+            <result property="username" column="author_username"/>
+            <result property="avatar" column="author_avatar"/>
+            <result property="occupation" column="author_occupation"/>
+        </association>
+        <!-- 下架操作者不是作者，是另一个人，所以另起一个 association；列名同理避开 author_* -->
+        <association property="offlinedByUser" javaType="com.ayun.entity.User">
+            <id property="id" column="offlined_by"/>
+            <result property="username" column="offliner_username"/>
+        </association>
+        <association property="category" javaType="com.ayun.entity.Category">
+            <id property="id" column="category_id"/>
+            <result property="name" column="category_name"/>
+        </association>
+    </resultMap>
+
+    <!-- 热榜不是史榜：多信号加权得分 ÷ 时间衰减，老文即使累计阅读更高也会被近期高互动文章反超。
+         权重与衰减系数内联为常量（不做配置化）；衰减基准优先 published_at，存量空值回退 created_at。
+         GREATEST 把基准钳到 2：定时文章被提前手工发布时 published_at 仍是未来时刻（db-design.md §5.3 未裁决项），
+         DATEDIFF 取负会让 POW(负数, 0.6) 直接抛 1690 _out_of_range 打断整条查询；正常数据下该钳位不改变任何分值。
+         首页「推荐」与侧栏热榜共用这一份表达式，改一次两处同时生效 -->
+    <sql id="heatScore">
+        ( COALESCE(p.view_count, 0)
+        + COALESCE(p.like_count, 0) * 3
+        + COALESCE(p.comment_count, 0) * 5 )
+        / POW( GREATEST( DATEDIFF(NOW(), COALESCE(p.published_at, p.created_at)) + 2, 2 ), 0.6 )
+    </sql>
+
+    <!-- 列表侧的取列清单 = PostResultMap 映射的列去掉 content。
+         正文是 LONGTEXT 列，五条列表查询（首页与搜索、草稿箱、我的文章、点赞过的、后台文章）都不该把它读出来，
+         更不该序列化进响应；正文只在详情 findById 里取。前台搜索仍能按 p.content 过滤，只是不取回该列 -->
+    <sql id="listColumns">
+        p.id, p.title, p.excerpt, p.cover, p.author_id, p.category_id, p.status,
+        p.is_top, p.top_order, p.view_count, p.like_count, p.comment_count,
+        p.published_at, p.created_at, p.updated_at,
+        u.username as author_username, u.avatar as author_avatar,
+        c.name as category_name
+    </sql>
+
+    <!-- LIKE 关键词的字面量化：% 与 _ 在 LIKE 模式串里是通配符、\ 是转义符，读者把这三个字符搜进关键词时
+         （搜「100%」「a_b」）必须按字面量匹配，否则一个 % 就当通配符命中了全部文章，关键词尾部的 \ 还会吃掉后面的通配符。
+         替换顺序不能调：先转义 \ 自身，后面两步新写入的 \ 才不会被二次转义。
+         值仍由 #{keyword} 预编译绑定，REPLACE 发生在数据库侧，不存在拼 SQL；
+         ESCAPE 显式写死为反斜杠，与 MySQL 默认一致，不依赖 sql_mode 未关它 -->
+    <sql id="escapedKeyword">
+        REPLACE(REPLACE(REPLACE(#{keyword}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+    </sql>
+
+    <!-- 列表查询：首页、搜索、分类/标签页与侧栏热榜共用这一条。
+         排序与谓词见下，取列刻意不含 p.content -->
+    <select id="findAllBrief" resultMap="PostResultMap">
+        SELECT <include refid="listColumns"/>
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        <where>
+            p.status = 'published'
+            <if test="authorId != null">AND p.author_id = #{authorId}</if>
+            <if test="categoryId != null">AND p.category_id = #{categoryId}</if>
+            <if test="tagId != null">
+                AND p.id IN (SELECT post_id FROM post_tags WHERE tag_id = #{tagId})
+            </if>
+            <if test="keyword != null and keyword != ''">
+                <choose>
+                    <!-- 满 2 字才交给全文索引：ngram 的词元就是 2 个字符，1 字的词压根不在索引里，
+                         MATCH 对它必然 0 命中，所以短词必须留在 LIKE 分支 -->
+                    <when test="keyword.length() >= 2">
+                        <!-- BOOLEAN MODE + 双引号短语：把关键词整体当子串匹配。
+                             裸值进布尔模式会被 + - * " ( ) ~ & | ! 当成运算符解释，读者搜「C++」或「-5」就会查错甚至查崩，
+                             所以先摘掉内嵌的双引号再整体加引号；不用自然语言模式是因为它有 50% 出现率的停用阈值，
+                             库小的时候高频词会莫名其妙搜不到 -->
+                        AND MATCH(p.title, p.content) AGAINST(CONCAT('"', REPLACE(#{keyword}, '"', ''), '"') IN BOOLEAN MODE)
+                    </when>
+                    <otherwise>
+                        AND (p.title LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+                             OR p.content LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\')
+                    </otherwise>
+                </choose>
+            </if>
+        </where>
+        <choose>
+            <!-- recommended：首页「推荐」tab。置顶先行——置顶是编辑推荐，不与热度分竞争位次；
+                 同为置顶的多篇之间按 top_order 从大到小（权重本身就是编辑给定的先后，不该被热度分冲掉），
+                 其余按热度分倒序。
+                 末位补 p.id DESC：冷文互动全为 0 时分数必然并列，没有全序尾键，PageHelper 的 LIMIT/OFFSET
+                 会在并列行之间重复或漏取，滚动加载就表现为「同一篇出现两次」 -->
+            <when test="sort == 'recommended'">ORDER BY p.is_top DESC, p.top_order DESC, <include refid="heatScore"/> DESC, p.id DESC</when>
+            <!-- popular：侧栏热榜（/articles/hot）专用，纯热度、不因置顶改位次；单页取回，不做翻页，故不补尾键 -->
+            <when test="sort == 'popular'">ORDER BY <include refid="heatScore"/> DESC</when>
+            <!-- latest：置顶先行，置顶内部按权重从大到小；权重相同（含存量统一赋的 1）回落到发布时间倒序（对外契约口径），
+                 NULL（存量手工发布的无时刻行）沉底 -->
+            <otherwise>ORDER BY p.is_top DESC, p.top_order DESC, p.published_at DESC, p.id DESC</otherwise>
+        </choose>
+    </select>
+
+    <!-- 后台列表额外取下架留痕：这两列不在共享的 listColumns 里，公开列表根本不读它们，留痕不外泄。
+         操作者不是作者，另接一次 users 并用 offliner_* 别名列，避免与 author_* 撞名 -->
+    <select id="findAdminAll" resultMap="PostResultMap">
+        SELECT <include refid="listColumns"/>,
+               p.offlined_by, p.offlined_at, o.username as offliner_username
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN users o ON p.offlined_by = o.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        <where>
+            <if test="status != null and status != ''">AND p.status = #{status}</if>
+            <if test="authorId != null">AND p.author_id = #{authorId}</if>
+            <if test="categoryId != null">AND p.category_id = #{categoryId}</if>
+            <if test="keyword != null and keyword != ''">
+                AND p.title LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+            </if>
+            <if test="startDate != null and startDate != ''">
+                AND p.created_at &gt;= #{startDate}
+            </if>
+            <if test="endDate != null and endDate != ''">
+                AND p.created_at &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+            </if>
+        </where>
+        ORDER BY p.created_at DESC
+    </select>
+
+    <select id="findAuthors" resultType="com.ayun.model.vo.PostVO$AuthorVO">
+        SELECT DISTINCT u.id, u.username, u.avatar
+        FROM users u
+        INNER JOIN posts p ON p.author_id = u.id
+        ORDER BY u.username
+    </select>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(*) FROM posts
+    </select>
+
+    <select id="countPublished" resultType="long">
+        SELECT COUNT(*) FROM posts WHERE status = 'published'
+    </select>
+
+    <select id="findLatestPublishedAt" resultType="java.time.LocalDateTime">
+        SELECT MAX(published_at) FROM posts WHERE status = 'published'
+    </select>
+
+    <select id="countPublishedByCategory" resultType="com.ayun.model.vo.SiteStatsVO$CategoryCount">
+        SELECT category_id AS categoryId, COUNT(*) AS count
+        FROM posts
+        WHERE status = 'published' AND category_id IS NOT NULL
+        GROUP BY category_id
+    </select>
+
+    <select id="sumViewCount" resultType="long">
+        SELECT COALESCE(SUM(view_count), 0) FROM posts
+    </select>
+
+    <!-- 作者维度聚合：与公开列表 findAll 同一 status 谓词，只算已发布；无已发布文章时聚合行仍返回，各项为 0 -->
+    <select id="findAuthorStats" resultType="com.ayun.model.vo.PostVO$AuthorVO">
+        SELECT COUNT(*) AS article_count,
+               COALESCE(SUM(like_count), 0) AS like_count,
+               COALESCE(SUM(view_count), 0) AS view_count
+        FROM posts
+        WHERE author_id = #{authorId}
+          AND status = 'published'
+    </select>
+
+    <!-- 草稿箱的筛选谓词：列表与状态计数共用同一段，两处不许各写一份 -->
+    <sql id="draftScope">
+        <if test="keyword != null and keyword != ''">
+            AND p.title LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+        </if>
+        <if test="year != null">AND YEAR(p.updated_at) = #{year}</if>
+        <if test="month != null">AND MONTH(p.updated_at) = #{month}</if>
+    </sql>
+
+    <select id="findDrafts" resultMap="PostResultMap">
+        SELECT <include refid="listColumns"/>
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        <where>
+            p.author_id = #{authorId}
+            AND p.status IN ('draft', 'scheduled')
+            <if test="status != null and status != ''">
+                AND p.status = #{status}
+            </if>
+            <include refid="draftScope"/>
+        </where>
+        ORDER BY p.updated_at DESC
+    </select>
+
+    <!-- 状态视图的计数：与列表同一组谓词，唯独不叠加状态，否则点中哪个哪个就把自己算成 0 -->
+    <select id="countUnpublishedByStatus" resultType="com.ayun.model.vo.StatusCountVO">
+        SELECT COALESCE(SUM(CASE WHEN p.status = 'draft' THEN 1 ELSE 0 END), 0) AS draft_count,
+               COALESCE(SUM(CASE WHEN p.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled_count
+        FROM posts p
+        <where>
+            p.author_id = #{authorId}
+            AND p.status IN ('draft', 'scheduled')
+            <include refid="draftScope"/>
+        </where>
+    </select>
+
+    <!-- 个人主页「我的文章」出已发布与已下线：本查询以登录态的 author_id 为谓词，offline 天然只有作者本人能看到，
+         前端按 status 打「已下线」徽标；草稿与定时仍归上方 findDrafts，一处一份不重复列 -->
+    <select id="findMine" resultMap="PostResultMap">
+        SELECT <include refid="listColumns"/>
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        <where>
+            p.author_id = #{authorId}
+            AND p.status IN ('published', 'offline')
+            <if test="keyword != null and keyword != ''">
+                AND p.title LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+            </if>
+            <if test="year != null">AND YEAR(p.updated_at) = #{year}</if>
+            <if test="month != null">AND MONTH(p.updated_at) = #{month}</if>
+        </where>
+        ORDER BY p.updated_at DESC
+    </select>
+
+    <!-- 我赞过的文章：以点赞时刻倒序，且只出已发布——赞过的内容后来被撤下时不该继续留在这里 -->
+    <select id="findLikedByUser" resultMap="PostResultMap">
+        SELECT <include refid="listColumns"/>
+        FROM likes l
+        JOIN posts p ON p.id = l.post_id
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE l.user_id = #{userId}
+          AND p.status = 'published'
+        ORDER BY l.created_at DESC
+    </select>
+
+    <!-- 属主谓词三条件齐全（id + author_id + 未发布状态），删除前的属主确认只认这条查询的结果 -->
+    <select id="findOwnedDraft" resultMap="PostResultMap">
+        SELECT <include refid="listColumns"/>
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.id = #{id}
+          AND p.author_id = #{authorId}
+          AND p.status IN ('draft', 'scheduled')
+    </select>
+
+    <select id="findDraftIdsByAuthor" resultType="long">
+        SELECT id FROM posts
+        WHERE author_id = #{authorId} AND status IN ('draft', 'scheduled')
+    </select>
+
+    <update id="clearPublishedAt">
+        UPDATE posts SET published_at = NULL WHERE id = #{id}
+    </update>
+
+    <select id="findById" resultMap="PostResultMap">
+        SELECT p.*,
+               u.username as author_username, u.avatar as author_avatar, u.occupation as author_occupation,
+               c.name as category_name
+        FROM posts p
+        LEFT JOIN users u ON p.author_id = u.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.id = #{id}
+    </select>
+
+    <!-- id 由 Service 层以雪花 ID 显式生成并写入，不经数据库自增回填 -->
+    <insert id="insert">
+        INSERT INTO posts (id, title, content, excerpt, cover, author_id, category_id, status, is_top, published_at)
+        VALUES (#{id}, #{title}, #{content}, #{excerpt}, #{cover}, #{authorId}, #{categoryId}, #{status}, #{isTop}, #{publishedAt})
+    </insert>
+
+    <update id="update">
+        UPDATE posts
+        <set>
+            <if test="title != null">title = #{title},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="excerpt != null">excerpt = #{excerpt},</if>
+            <if test="cover != null">cover = #{cover},</if>
+            <if test="categoryId != null">category_id = #{categoryId},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="isTop != null">is_top = #{isTop},</if>
+            <if test="topOrder != null">top_order = #{topOrder},</if>
+            <if test="publishedAt != null">published_at = #{publishedAt},</if>
+            <!-- 下架留痕只写不清：判空即「本次没动下线就原样留着」，
+                 所以重新上线、纯内容保存、自动保存都抹不掉这条记录 -->
+            <if test="offlinedBy != null">offlined_by = #{offlinedBy},</if>
+            <if test="offlinedAt != null">offlined_at = #{offlinedAt},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM posts WHERE id = #{id}
+    </delete>
+
+    <update id="incrementViewCount">
+        UPDATE posts SET view_count = view_count + 1 WHERE id = #{id}
+    </update>
+
+    <update id="incrementCommentCount">
+        UPDATE posts SET comment_count = comment_count + 1 WHERE id = #{id}
+    </update>
+
+    <update id="decrementCommentCountBy">
+        UPDATE posts SET comment_count = GREATEST(comment_count - #{count}, 0) WHERE id = #{id}
+    </update>
+
+    <!-- 摘要回填的扫描：状态与摘要两列都进谓词，生成并落库之后该行不再命中，
+         所以重复执行只是空转，不需要额外的完成标记。只取 id 与 content，回填不读也不写别的列 -->
+    <select id="findNeedingExcerpt" resultMap="PostResultMap">
+        SELECT id, content
+        FROM posts
+        WHERE status IN ('published', 'scheduled')
+          AND (excerpt IS NULL OR TRIM(excerpt) = '')
+        ORDER BY id
+    </select>
+
+    <!-- 只写摘要一列。updated_at 自赋值是为了压住列定义上的 ON UPDATE CURRENT_TIMESTAMP：
+         回填不该让存量文章在排序与 sitemap 的 lastmod 上集体变成「刚刚编辑过」 -->
+    <update id="updateExcerpt">
+        UPDATE posts
+        SET excerpt = #{excerpt},
+            updated_at = updated_at
+        WHERE id = #{id}
+    </update>
+
+    <!-- sitemap：只取定位与时刻两列，按 id 排序保证同一批数据每次生成的条目顺序一致 -->
+    <select id="findAllPublishedForSitemap" resultMap="PostResultMap">
+        SELECT id, updated_at
+        FROM posts
+        WHERE status = 'published'
+        ORDER BY id
+    </select>
+
+    <!-- RSS：最新 N 篇。published_at 倒序时 NULL 沉底（存量手工发布的行），
+         因此同时带出 created_at 供 pubDate 回落，末位补 id DESC 当全序尾键 -->
+    <select id="findLatestPublishedForFeed" resultMap="PostResultMap">
+        SELECT id, title, excerpt, published_at, created_at
+        FROM posts
+        WHERE status = 'published'
+        ORDER BY published_at DESC, id DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.TagMapper">
+    <select id="findAll" resultType="com.ayun.entity.Tag">
+        SELECT * FROM tags
+    </select>
+
+    <select id="findAllWithCount" resultType="com.ayun.model.vo.AdminTagVO">
+        SELECT t.id, t.name, t.created_at,
+               (SELECT COUNT(*) FROM post_tags WHERE tag_id = t.id) as article_count
+        FROM tags t
+        ORDER BY article_count DESC, t.created_at DESC
+    </select>
+
+    <select id="findById" resultType="com.ayun.entity.Tag">
+        SELECT * FROM tags WHERE id = #{id}
+    </select>
+
+    <select id="findByName" resultType="com.ayun.entity.Tag">
+        SELECT * FROM tags WHERE name = #{name}
+    </select>
+
+    <update id="update">
+        UPDATE tags SET name = #{name} WHERE id = #{id}
+    </update>
+
+    <select id="findByPostId" resultType="com.ayun.entity.Tag">
+        SELECT t.* FROM tags t
+        JOIN post_tags pt ON t.id = pt.tag_id
+        WHERE pt.post_id = #{postId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO tags (name) VALUES (#{name})
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM tags WHERE id = #{id}
+    </delete>
+
+    <delete id="deletePostTagsByTagId">
+        DELETE FROM post_tags WHERE tag_id = #{tagId}
+    </delete>
+
+    <delete id="deleteConflictingPostTags">
+        DELETE pt FROM post_tags pt
+        INNER JOIN post_tags pt2 ON pt2.post_id = pt.post_id AND pt2.tag_id = #{targetId}
+        WHERE pt.tag_id = #{sourceId}
+    </delete>
+
+    <update id="movePostTags">
+        UPDATE post_tags SET tag_id = #{targetId} WHERE tag_id = #{sourceId}
+    </update>
+
+    <insert id="insertPostTag">
+        INSERT INTO post_tags (post_id, tag_id) VALUES (#{postId}, #{tagId})
+    </insert>
+
+    <delete id="deletePostTags">
+        DELETE FROM post_tags WHERE post_id = #{postId}
+    </delete>
+</mapper>

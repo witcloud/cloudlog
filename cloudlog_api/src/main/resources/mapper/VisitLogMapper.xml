@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.VisitLogMapper">
+
+    <!-- UA 关键词按字面量匹配：LIKE 的两个通配符与转义符本身都要摘掉，口径与 PostMapper 的 escapedKeyword 一致 -->
+    <sql id="escapedKeyword">
+        REPLACE(REPLACE(REPLACE(#{userAgent}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+    </sql>
+
+    <!-- 时间范围谓词：概览、趋势、三个 Top 榜与明细共用同一段，窗口口径不可能分岔 -->
+    <sql id="windowRange">
+        v.created_at &gt;= #{start} AND v.created_at &lt; #{end}
+    </sql>
+
+    <!-- created_at 不出现在列清单里：访问时刻由库默认值 CURRENT_TIMESTAMP 决定，应用层不赋值 -->
+    <insert id="insert" parameterType="com.ayun.entity.VisitLog">
+        INSERT INTO visit_logs (post_id, ip, user_agent)
+        VALUES (#{postId}, #{ip}, #{userAgent})
+    </insert>
+
+    <!-- 保留期清理：谓词只有 created_at 一个范围，走 idx_created_at -->
+    <delete id="deleteCreatedBefore">
+        DELETE FROM visit_logs WHERE created_at &lt; #{threshold}
+    </delete>
+
+    <!-- 两条窗口在一次扫描里按时刻落在哪一侧分别计数：SUM(布尔) 是本窗口的行数，
+         SUM(布尔取反) 是前一等长窗口的行数，两个数必然出自同一份数据，涨跌比才不会与概览其他卡对不上。
+         WHERE 用 prevStart 起算，把两条窗口一次覆盖住；空结果集下 SUM 为 NULL，用 COALESCE 归成 0 -->
+    <select id="countWindow" resultType="com.ayun.model.vo.VisitLogSummaryVO$WindowCount">
+        SELECT COALESCE(SUM(created_at &gt;= #{start}), 0)                                     AS pv,
+               COUNT(DISTINCT CASE WHEN created_at &gt;= #{start} THEN ip END)                 AS uv,
+               COUNT(DISTINCT CASE WHEN created_at &gt;= #{start} THEN post_id END)            AS post_count,
+               COALESCE(SUM(created_at &lt; #{start}), 0)                                      AS prev_pv
+        FROM visit_logs
+        WHERE created_at &gt;= #{prevStart}
+          AND created_at &lt; #{end}
+    </select>
+
+    <!-- 日视图按天分桶，今日视图按小时分桶（00–23）。缺访问的桶不在结果里，由服务层补 0 -->
+    <select id="findTrend" resultType="com.ayun.model.vo.VisitLogSummaryVO$TrendCount">
+        SELECT
+        <choose>
+            <when test="byHour">DATE_FORMAT(v.created_at, '%H')</when>
+            <otherwise>DATE_FORMAT(v.created_at, '%Y-%m-%d')</otherwise>
+        </choose>
+               AS bucket,
+               COUNT(*) AS visit_count
+        FROM visit_logs v
+        WHERE <include refid="windowRange"/>
+        GROUP BY bucket
+        ORDER BY bucket
+    </select>
+
+    <!-- 左连 posts：文章已删的行标题为 null 但仍然上榜（访问确实发生过），
+         这样榜单各行的分母之和才等于概览那格的 PV -->
+    <select id="findTopPosts" resultType="com.ayun.model.vo.VisitLogSummaryVO$TopPost">
+        SELECT v.post_id        AS post_id,
+               p.title          AS title,
+               COUNT(*)         AS visit_count
+        FROM visit_logs v
+                 LEFT JOIN posts p ON p.id = v.post_id
+        WHERE <include refid="windowRange"/>
+        GROUP BY v.post_id, p.title
+        ORDER BY visit_count DESC, v.post_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 按原始地址分组、不加 LIMIT：脱敏会把同一 /16 下的多个地址并成一格，
+         先截断再合并会让榜单偏小。分组行数由窗口内的真实访问者数决定，量级由保留期兜住 -->
+    <select id="countByIp" resultType="com.ayun.model.vo.VisitLogSummaryVO$IpCount">
+        SELECT v.ip      AS ip,
+               COUNT(*)  AS visit_count
+        FROM visit_logs v
+        WHERE <include refid="windowRange"/>
+        GROUP BY v.ip
+        ORDER BY visit_count DESC, v.ip ASC
+    </select>
+
+    <!-- 两次左连：文章已删、分类已删、文章本就无分类三种情况都落在 c.id 为 NULL 的同一格里（前端渲染为「未分类」） -->
+    <select id="findTopCategories" resultType="com.ayun.model.vo.VisitLogSummaryVO$TopCategory">
+        SELECT c.name       AS category_name,
+               COUNT(*)     AS visit_count
+        FROM visit_logs v
+                 LEFT JOIN posts p ON p.id = v.post_id
+                 LEFT JOIN categories c ON c.id = p.category_id
+        WHERE <include refid="windowRange"/>
+        GROUP BY c.id, c.name
+        ORDER BY visit_count DESC, c.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 明细：四个条件都可组合，时间范围恒在（缺省即当日）。
+         ipPattern 由 IpMaskUtils.likePattern() 生成，通配符已在 Java 侧转义过，这里不再 REPLACE；
+         末位的 v.id DESC 是全序尾键——同一秒内的多次访问缺它会在翻页时重复或漏取 -->
+    <select id="findAdminList" resultType="com.ayun.model.vo.VisitLogItemVO$VisitRow">
+        SELECT v.id         AS id,
+               v.created_at AS created_at,
+               v.post_id    AS post_id,
+               p.title      AS post_title,
+               v.ip         AS ip,
+               v.user_agent AS user_agent
+        FROM visit_logs v
+                 LEFT JOIN posts p ON p.id = v.post_id
+        WHERE <include refid="windowRange"/>
+        <if test="postId != null">AND v.post_id = #{postId}</if>
+        <if test="ipPattern != null">AND v.ip LIKE #{ipPattern} ESCAPE '\\'</if>
+        <if test="userAgent != null and userAgent != ''">
+            AND v.user_agent LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+        </if>
+        ORDER BY v.created_at DESC, v.id DESC
+    </select>
+
+</mapper>

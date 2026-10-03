@@ -1,0 +1,21 @@
+package com.ayun.model.dto;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
+
+/**
+ * 管理后台违禁词库查询参数 DTO
+ */
+@Data
+@Schema(description = "管理后台违禁词库查询参数")
+public class AdminBannedWordQueryDTO {
+
+    @Schema(description = "页码", defaultValue = "1")
+    private Integer page = 1;
+
+    @Schema(description = "每页条数", defaultValue = "15")
+    private Integer pageSize = 15;
+
+    @Schema(description = "关键词（按词面模糊匹配）")
+    private String keyword;
+}

@@ -1,0 +1,210 @@
+/* Hallmark · genre: editorial · macrostructure: Index-First · tone: Editorial + Technical + Minimal · anchor hue: 38 (朱砂)
+ * theme: custom (vibe: 纸面编辑部 · 参数化技术 · 一枚朱砂) · axes: light paper / roman-serif (CJK 宋体系) / warm accent
+ * nav: N9 edge-aligned · footer: Ft2 inline single line · design-system: docs/ui-design.md · designed-as-app
+ *
+ * 所有颜色/字体/间距/圆角/阴影/动效一律引用这里的命名 Token，禁止在组件里写裸值。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- 纸与墨 · light（暖纸面，色相 80 轻度染色，无纯黑白） ---- */
+  --color-paper: oklch(97.6% 0.008 80); /* 页面底 */
+  --color-paper-2: oklch(99.1% 0.004 80); /* 抬升面（卡、输入、抽屉） */
+  --color-paper-3: oklch(95.2% 0.012 80); /* 凹陷面（代码、引用、悬停底） */
+  --color-ink: oklch(22% 0.012 70); /* 主文字 */
+  --color-ink-2: oklch(35% 0.012 72); /* 正文次级 */
+  --color-ink-3: oklch(46% 0.012 72); /* 辅助说明、日期 */
+  --color-ink-4: oklch(54% 0.01 76); /* 占位、最弱数据 */
+  --color-rule: oklch(88% 0.012 78); /* 发丝线 */
+  --color-rule-strong: oklch(74% 0.014 74); /* 控件描边（≥3:1） */
+
+  /* ---- 唯一强调色：朱砂（视口占比 ≤5%） ---- */
+  --color-accent: oklch(48% 0.15 38);
+  --color-accent-ink: oklch(42% 0.15 38); /* 强调色悬停/加深 */
+  --color-accent-wash: oklch(48% 0.15 38 / 0.08); /* 强调色洗染底 */
+  --color-focus: oklch(52% 0.16 45);
+
+  /* ---- 扫码面 · 主题不变量（html.dark 刻意不覆盖：反色二维码扫码器读不出） ---- */
+  --color-qr-surface: oklch(99% 0 0); /* 二维码底 */
+  --color-qr-ink: oklch(12% 0 0); /* 二维码模块 */
+
+  /* ---- 功能色（仅供校验/提示，不参与版面） ---- */
+  --color-danger: oklch(50% 0.16 28);
+  --color-success: oklch(52% 0.11 150);
+  --color-warning: oklch(62% 0.12 70);
+
+  /* ---- 字体：Noto Sans SC 全站正文与标题 + JetBrains Mono 数据/代码（wordmark/日期/计数/排名） ---- */
+  --font-display:
+    'Noto Sans SC', 'PingFang SC', 'HarmonyOS Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    system-ui, sans-serif;
+  --font-body:
+    'Noto Sans SC', 'PingFang SC', 'HarmonyOS Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    system-ui, sans-serif;
+  --font-mono:
+    'JetBrains Mono', 'Noto Sans SC', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas,
+    monospace;
+
+  /* ---- 字阶 · 1.25 大三度，中文下限 12px ---- */
+  --text-xs: 0.75rem; /* 12 */
+  --text-sm: 0.8125rem; /* 13 */
+  --text-base: 1rem; /* 16 */
+  --text-md: 1.25rem; /* 20 */
+  --text-lg: 1.5625rem; /* 25 */
+  --text-xl: 1.9531rem; /* 31 */
+  --text-2xl: 2.4414rem; /* 39 */
+  --text-display: clamp(2.25rem, 3.5vw + 1rem, 3.25rem);
+
+  /* ---- 间距 · 4pt 刻度 ---- */
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+
+  /* ---- 圆角：小 ---- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* ---- 阴影：弱（主要靠发丝线分层） ---- */
+  --shadow-whisper: 0 1px 2px oklch(20% 0.01 75 / 0.06);
+
+  /* ---- 遮罩层（弹窗/上传蒙层） ---- */
+  --color-overlay: oklch(15% 0.01 75 / 0.55);
+
+  /* ---- 灯箱暗面 · 主题不变量（html.dark 刻意不覆盖：看图必须压在暗面上，
+         否则暗色主题下浅面配浅图、深控件配深面两头都读不出） ---- */
+  --color-stage: oklch(12% 0.01 75 / 0.92);
+  --color-stage-ink: oklch(96% 0.004 80);
+
+  /* ---- 动效 ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+
+  /* ---- 层级 ---- */
+  --z-base: 1;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+  --z-lightbox: 700;
+
+  /* ---- 版面 ---- */
+  --container-max: 72rem;
+  --header-h: 3.5rem;
+  /* 正文书写列上限：编辑器画布与预览浮层共用同一档，这两处换行位置一致，
+     「编辑所见即所得」才成立（ui-design.md §3.9）。
+     详情页正文不吃这一档——它与同列的评论卡共用 --space-md 内衬，撑满主栏 */
+  --measure-prose: 46rem;
+  /* 正文插图的内联高度上限：竖图缩到栏宽后仍可能高过一屏，这里把内联那一档收住，
+     完整画面走点击查看大图。详情页与编辑器预览共用同一值，两端换行/占位才一致 */
+  --figure-max-h: 70vh;
+
+  /* ---- Element Plus → Token 映射（light） ---- */
+  --el-color-primary: var(--color-accent);
+  --el-color-primary-dark-2: var(--color-accent-ink);
+  --el-color-primary-light-3: color-mix(in oklab, var(--color-accent) 70%, var(--color-paper-2));
+  --el-color-primary-light-5: color-mix(in oklab, var(--color-accent) 50%, var(--color-paper-2));
+  --el-color-primary-light-7: color-mix(in oklab, var(--color-accent) 30%, var(--color-paper-2));
+  --el-color-primary-light-8: color-mix(in oklab, var(--color-accent) 20%, var(--color-paper-2));
+  --el-color-primary-light-9: var(--color-accent-wash);
+  --el-color-danger: var(--color-danger);
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-info: var(--color-ink-3);
+  --el-text-color-primary: var(--color-ink);
+  --el-text-color-regular: var(--color-ink-2);
+  --el-text-color-secondary: var(--color-ink-3);
+  --el-text-color-placeholder: var(--color-ink-4);
+  --el-text-color-disabled: var(--color-ink-4);
+  --el-border-color: var(--color-rule-strong);
+  --el-border-color-light: var(--color-rule);
+  --el-border-color-lighter: var(--color-rule);
+  --el-border-color-extra-light: var(--color-rule);
+  --el-bg-color: var(--color-paper-2);
+  --el-bg-color-page: var(--color-paper);
+  --el-bg-color-overlay: var(--color-paper-2);
+  --el-fill-color: var(--color-paper-3);
+  --el-fill-color-light: color-mix(in oklab, var(--color-paper-3) 60%, var(--color-paper-2));
+  --el-fill-color-lighter: color-mix(in oklab, var(--color-paper-3) 30%, var(--color-paper-2));
+  --el-fill-color-extra-light: color-mix(in oklab, var(--color-paper-3) 15%, var(--color-paper-2));
+  --el-fill-color-blank: var(--color-paper-2);
+  --el-disabled-bg-color: var(--color-paper-3);
+  --el-disabled-text-color: var(--color-ink-4);
+  --el-disabled-border-color: var(--color-rule);
+  --el-font-family: var(--font-body);
+  --el-border-radius-base: var(--radius-sm);
+  --el-border-radius-small: var(--radius-xs);
+  --el-box-shadow-light: var(--shadow-whisper);
+}
+
+html.dark {
+  color-scheme: dark;
+
+  /* 暗色沿同一色相加深：纸降墨升，朱砂提亮降饱和 */
+  --color-paper: oklch(16% 0.01 75);
+  --color-paper-2: oklch(19.5% 0.012 75);
+  --color-paper-3: oklch(13.5% 0.008 75);
+  --color-ink: oklch(93% 0.008 85);
+  --color-ink-2: oklch(78% 0.01 82);
+  --color-ink-3: oklch(67% 0.01 80);
+  --color-ink-4: oklch(58% 0.008 78);
+  --color-rule: oklch(28% 0.01 75);
+  --color-rule-strong: oklch(38% 0.012 75);
+
+  --color-accent: oklch(66% 0.13 40);
+  --color-accent-ink: oklch(72% 0.12 42);
+  --color-accent-wash: oklch(66% 0.13 40 / 0.12);
+  --color-focus: oklch(70% 0.14 48);
+
+  --color-danger: oklch(64% 0.15 25);
+  --color-success: oklch(68% 0.1 150);
+  --color-warning: oklch(72% 0.11 70);
+
+  --shadow-whisper: 0 1px 2px oklch(0% 0 0 / 0.35);
+
+  /* Element Plus → Token 映射（dark，需位于 dark/css-vars 之后引入以覆盖） */
+  --el-color-primary: var(--color-accent);
+  --el-color-primary-dark-2: var(--color-accent-ink);
+  --el-color-primary-light-3: color-mix(in oklab, var(--color-accent) 70%, var(--color-paper-2));
+  --el-color-primary-light-5: color-mix(in oklab, var(--color-accent) 50%, var(--color-paper-2));
+  --el-color-primary-light-7: color-mix(in oklab, var(--color-accent) 30%, var(--color-paper-2));
+  --el-color-primary-light-8: color-mix(in oklab, var(--color-accent) 20%, var(--color-paper-2));
+  --el-color-primary-light-9: var(--color-accent-wash);
+  --el-color-danger: var(--color-danger);
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-info: var(--color-ink-3);
+  --el-text-color-primary: var(--color-ink);
+  --el-text-color-regular: var(--color-ink-2);
+  --el-text-color-secondary: var(--color-ink-3);
+  --el-text-color-placeholder: var(--color-ink-4);
+  --el-text-color-disabled: var(--color-ink-4);
+  --el-border-color: var(--color-rule-strong);
+  --el-border-color-light: var(--color-rule);
+  --el-border-color-lighter: var(--color-rule);
+  --el-border-color-extra-light: var(--color-rule);
+  --el-bg-color: var(--color-paper-2);
+  --el-bg-color-page: var(--color-paper);
+  --el-bg-color-overlay: var(--color-paper-2);
+  --el-fill-color: var(--color-paper-3);
+  --el-fill-color-light: color-mix(in oklab, var(--color-paper-3) 40%, var(--color-paper-2));
+  --el-fill-color-lighter: color-mix(in oklab, var(--color-paper-3) 20%, var(--color-paper-2));
+  --el-fill-color-extra-light: color-mix(in oklab, var(--color-paper-3) 10%, var(--color-paper-2));
+  --el-fill-color-blank: var(--color-paper-2);
+  --el-disabled-bg-color: var(--color-paper-3);
+  --el-disabled-text-color: var(--color-ink-4);
+  --el-disabled-border-color: var(--color-rule);
+}

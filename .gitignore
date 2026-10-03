@@ -2,11 +2,12 @@
 .DS_Store
 Thumbs.db
 
-# IDE
-/.idea/
+# IDE（本文件是唯一忽略入口，故不锚定根目录，覆盖各子项目层级）
+.idea/
 *.iml
-/.vscode/
+.vscode/
 *.code-workspace
+.eslintcache
 
 # Logs
 *.log
@@ -21,14 +22,14 @@ dist/
 coverage/
 *.tsbuildinfo
 
-# Local env & secrets（配置本体只放本地，禁止提交；仅 *.example 模板入库）
+# Local env & secrets（配置本体只放本地，禁止提交；仅 *.example 模板与 application-prod.yml 入库）
 .env
 .env.*
 !.env.example
-api/src/main/resources/application.yml
+cloudlog_api/src/main/resources/application*.yml
+!cloudlog_api/src/main/resources/application.example.yml
+!cloudlog_api/src/main/resources/application-prod.yml
 
-# 其余项目内细节忽略规则由 web/.gitignore 与 api/.gitignore 分别维护
-
-# 项目本地工作流与设计草稿
+# 项目本地工作流目录（docs/ 下的正式文档照常入库）
 .hallmark/
-design.md
+.zcode/

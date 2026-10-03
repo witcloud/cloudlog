@@ -1,0 +1,111 @@
+# ============================================================
+# CloudLog 后端配置模板
+# 复制本文件为 application.yml 并填入真实值（application.yml 不会被提交）
+# ============================================================
+
+spring:
+  application:
+    name: CloudLog
+  datasource:
+    url: jdbc:mysql://localhost:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: your_mysql_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: your_redis_password
+      database: 0
+  mail:
+    host: smtp.qq.com
+    username: your_email@qq.com
+    password: your_smtp_authorization_code
+    port: 587
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          # 三项超时上限（毫秒）。JavaMail 不配这三项时对 socket 读写根本不限时：SMTP 地址解析得出、端口却不
+          # 响应时（云主机封禁 25/587 出站是常见情形），发码线程会一直挂在 connect/read 上直到容器请求超时，
+          # 用户侧只剩「点了没反应」；设了上限才拿得到明确的失败
+          connectiontimeout: 5000 # 建立 TCP 连接
+          timeout: 5000 # 等待 SMTP 响应
+          writetimeout: 5000 # 向 SMTP 写入邮件内容
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.ayun.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+pagehelper:
+  helperDialect: mysql
+  reasonable: true
+  supportMethodsArguments: true
+  params: count=countSql
+
+# JWT Configuration
+jwt:
+  secret: your_jwt_secret_key_at_least_32_characters_long
+  expiration: 604800 # 7 days in seconds
+  header: Authorization
+  prefix: "Bearer "
+
+logging:
+  level:
+    com.ayun: debug
+    org.springframework.security: info
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: alpha
+    tagsSorter: alpha
+
+# MinIO Configuration
+minio:
+  endpoint: http://127.0.0.1:9000
+  accessKey: minioadmin
+  secretKey: minioadmin
+  bucketName: cloudlog
+
+# 来源地址取值口径。X-Forwarded-For 是客户端可以自己写的请求头，直连部署时采信它，
+# 登录防爆破的计数键就成了「改一个头换一个额度」，访问日志与登录日志也照单记下假地址。
+# 因此默认 false（一律取直连地址）；只有确认应用进程只接受来自本机/内网可信反向代理的转发、
+# 客户端无法绕过代理直连 server.port 时，才设为 true。
+app:
+  security:
+    trust-forwarded-for: false
+  # 存量摘要回填：启动时给「已发布或定时、但摘要为空」的文章从正文补一次摘要（business-model.md §2.3）。
+  # 幂等靠扫描谓词本身——落库后该行不再命中，跑过即空转，所以默认开；
+  # 置 false 即跳过回填，只让此后发布的文章带摘要（存量文章列表那一行留空）。
+  backfill:
+    excerpt: true
+
+# 上面的开关为 true 时，代理侧的参考配置（Nginx）。关键是覆盖而不是追加：
+# $proxy_add_x_forwarded_for 会把客户端带来的伪造值留在链首，而取值口径只看链首那一段。
+#   location /api/ {
+#       proxy_pass http://127.0.0.1:8080;
+#       proxy_set_header X-Forwarded-For $remote_addr;   # 覆盖：链首只可能是代理看到的直连地址
+#       proxy_set_header X-Real-IP $remote_addr;
+#   }

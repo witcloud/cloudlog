@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.UserMapper">
+    <select id="findByEmail" resultType="com.ayun.entity.User">
+        SELECT * FROM users WHERE email = #{email}
+    </select>
+    
+    <select id="findByUsername" resultType="com.ayun.entity.User">
+        SELECT * FROM users WHERE username = #{username}
+    </select>
+    
+    <select id="findById" resultType="com.ayun.entity.User">
+        SELECT * FROM users WHERE id = #{id}
+    </select>
+    
+    <!-- id 由 Service 层以雪花 ID 显式生成并写入，不经数据库自增回填 -->
+    <insert id="insert">
+        INSERT INTO users (id, email, password, username, avatar, bio, role, status)
+        VALUES (#{id}, #{email}, #{password}, #{username}, #{avatar}, #{bio}, #{role}, #{status})
+    </insert>
+    
+    <update id="update">
+        UPDATE users
+        <set>
+            <if test="email != null">email = #{email},</if>
+            <if test="password != null">password = #{password},</if>
+            <if test="username != null">username = #{username},</if>
+            <if test="avatar != null">avatar = #{avatar},</if>
+            <if test="bio != null">bio = #{bio},</if>
+            <if test="occupation != null">occupation = #{occupation},</if>
+            <if test="role != null">role = #{role},</if>
+            <if test="status != null">status = #{status},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 关键词按字面量匹配：% 与 _ 是 LIKE 通配符、\ 是转义符，替换顺序与 ESCAPE 口径同 PostMapper 的 escapedKeyword -->
+    <sql id="escapedKeyword">
+        REPLACE(REPLACE(REPLACE(#{keyword}, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+    </sql>
+
+    <select id="findAdminList" resultType="com.ayun.model.vo.AdminUserVO">
+        SELECT u.id, u.email, u.username, u.avatar, u.bio, u.occupation, u.role, u.status, u.created_at,
+               u.last_login_at, u.last_login_ip,
+               (SELECT COUNT(*) FROM posts WHERE author_id = u.id) as article_count
+        FROM users u
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (u.username LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\'
+                     OR u.email LIKE CONCAT('%', <include refid="escapedKeyword"/>, '%') ESCAPE '\\')
+            </if>
+            <if test="status != null">AND u.status = #{status}</if>
+        </where>
+        ORDER BY u.created_at DESC
+    </select>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(*) FROM users
+    </select>
+
+    <update id="updateStatus">
+        UPDATE users SET status = #{status} WHERE id = #{id}
+    </update>
+
+    <!-- 登录留痕是独立语义，不借 update 的 <set>；updated_at 自赋值用以按住该列的
+         ON UPDATE CURRENT_TIMESTAMP，否则一次登录会被记成一次资料改动 -->
+    <update id="updateLastLogin">
+        UPDATE users
+        SET last_login_at = NOW(),
+            last_login_ip = #{ip},
+            updated_at = updated_at
+        WHERE id = #{id}
+    </update>
+</mapper>

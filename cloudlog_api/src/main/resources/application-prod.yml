@@ -1,0 +1,26 @@
+# ============================================================
+# 生产环境覆盖配置（--spring.profiles.active=prod 时生效）
+# 只放「与默认配置不同」的收紧项；数据源、Redis、SMTP、MinIO 等仍取 application.yml。
+# 本文件会被提交，禁止写入任何真实凭据。
+# 对应规则：business-model.md §3.3「运维面收敛」
+# ============================================================
+
+springdoc:
+  api-docs:
+    enabled: false # /v3/api-docs 不再注册，SecurityConfig 同时撤掉三条文档路径的匿名放行
+  swagger-ui:
+    enabled: false # /swagger-ui.html 与 /swagger-ui/** 不再注册
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health # actuator 只暴露健康检查，其余端点根本不注册
+
+# 是否采信 X-Forwarded-For 取来源地址。保持 false 除非确认：8080 只由本机 Nginx 转发、外网直连不到应用进程。
+# 一旦客户端能绕过代理直连端口，这个头就是攻击者自填的——登录爆破计数按来源地址分键，
+# 换一个头换一个额度，锁定等于不存在；来源地址为 true 时也必须是代理覆盖而非追加
+# （proxy_set_header X-Forwarded-For $remote_addr;，写法见 application.example.yml 的 Nginx 参考配置）。
+app:
+  security:
+    trust-forwarded-for: false

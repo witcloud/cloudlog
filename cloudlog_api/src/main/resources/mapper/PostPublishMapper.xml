@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ayun.mapper.PostPublishMapper">
+
+    <!-- status 谓词同时承担两件事：重复扫描只影响 0 行（幂等），以及已被手工发布的行不会被回退。
+         published_at 不在此处改写：scheduled 期间它存的就是计划时刻，即首次对外可见的时刻（db-design.md §5.3）。
+         published_at IS NULL 的存量行在 SQL 三值逻辑下不满足谓词，按 §5.3 交人工处理，不由调度器兜底。 -->
+    <update id="publishDueArticles">
+        UPDATE posts
+        SET status = 'published'
+        WHERE status = 'scheduled'
+          AND published_at &lt;= NOW()
+    </update>
+</mapper>
