@@ -6,8 +6,12 @@ import { ElLoading } from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import 'nprogress/nprogress.css'
+// 字重只加载 400 与 700，砍掉 500：实测单篇中文文章首访的 woff2 里 400 档 256 kB、700 档 157 kB、500 档 52 kB，
+// 三档的 @font-face 声明各是 102.8 kB 的 CSS 文本。为什么不砍 700——浏览器不会为缺失的字重跳到字体栈里的
+// 下一个 family，而是在同一 family 内取最近的脸再算法合成假粗；实测假粗的墨量密度只有真 700 的 78%
+// （700/400 alpha 比：真字重 1.424 vs 合成 1.107），CJK 下表现为糊而不是重。
+// 代价：源码里 9 处 font-weight: 500 按匹配规则落到 400（半粗变常规），集中在卡片标题与后台标签这类层级
 import '@fontsource/noto-sans-sc/400.css'
-import '@fontsource/noto-sans-sc/500.css'
 import '@fontsource/noto-sans-sc/700.css'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/600.css'
