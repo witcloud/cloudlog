@@ -23,7 +23,8 @@ fi
 
 RUN_TAG="$(date +%s)"
 TEST_EMAIL="deploy-verify-$RUN_TAG@example.com"
-TEST_USERNAME="deploybot"
+# 用户名也必须带 RUN_TAG：--keep 保留数据卷，写死的用户名会让第二次跑撞「该用户名已被占用」
+TEST_USERNAME="deploybot-$RUN_TAG"
 TEST_PASSWORD="DeployVerify-2026"
 CATEGORY_NAME="容器化部署验证-$RUN_TAG"
 POST_TITLE="容器化部署最小闭环验证 $RUN_TAG"
@@ -121,8 +122,11 @@ send_code_and_read() {
     fi
 
     for _ in $(seq 1 5); do
+        # 取回的值还要去掉双引号：RedisTemplate 的 value 用 JSON 序列化器写 String，
+        # 落库形态是 "380519"（带引号），原样拼进请求体就成了 {"code":""380519""}，
+        # 后端返「请求体格式错误」（实测 Jackson 报 was expecting comma to separate Object entries）
         code="$(docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
-            GET "auth:code:$TEST_EMAIL" | tr -d '\r' || true)"
+            GET "auth:code:$TEST_EMAIL" | tr -d '\r"' || true)"
         if [[ -n "$code" ]]; then
             break
         fi

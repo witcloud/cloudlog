@@ -16,6 +16,12 @@ management:
     web:
       exposure:
         include: health # actuator 只暴露健康检查，其余端点根本不注册
+  health:
+    mail:
+      # 健康检查不该去连 SMTP：邮箱服务商不可达只是发不出信，不该把整个实例判 DOWN。
+      # 编排里这条是硬依赖——/actuator/health 返 503 会让 api 恒 unhealthy，
+      # web 的 depends_on: service_healthy 永远等不到（实测占位 SMTP 下启动成功、5 秒后被拖 DOWN）
+      enabled: false
 
 # 是否采信 X-Forwarded-For 取来源地址。保持 false 除非确认：8080 只由本机 Nginx 转发、外网直连不到应用进程。
 # 一旦客户端能绕过代理直连端口，这个头就是攻击者自填的——登录爆破计数按来源地址分键，

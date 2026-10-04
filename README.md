@@ -11,7 +11,7 @@ cloudlog/
 │   └── nginx.conf      # 三条 SEO 精确映射 + SPA 回退 + /api/v1 反代
 ├── cloudlog_api/ # 后端项目（Spring Boot 3.5 + MyBatis）
 │   └── Dockerfile      # maven 构建 → JRE 21 运行
-├── deploy/ # 容器化部署：挂载进 api 的结构配置 + 最小闭环验证脚本
+├── deploy/ # 容器化部署：挂载进 api 的结构配置 + 最小闭环验证脚本 + 数据库备份脚本
 ├── docs/ # 项目规范（业务模型 / 数据库设计 / UI 设计）、schema.sql（建表真源）与 data.sql（演示数据）
 ├── docker-compose.yml # 单实例编排：MySQL + Redis + 后端 + 前端（MinIO 见 --profile images）
 ├── .env.example # 容器部署的凭据模板（复制为 .env，.env 不入库）
@@ -98,8 +98,10 @@ mysql -u root -p cloudlog -e "UPDATE users SET role = 'admin' WHERE email = '你
 还没配真实 SMTP 时收不到验证码邮件——码只写 Redis、不打日志，5 分钟过期、校验通过即销毁。点过「发送验证码」之后直接把它读出来：
 
 ```bash
-redis-cli GET "auth:code:你的注册邮箱"
+redis-cli GET "auth:code:你的注册邮箱" | tr -d '"'
 ```
+
+末尾那个 `tr` 不是可选的：`RedisTemplate` 的 value 走 JSON 序列化，落进 Redis 的是带双引号的 `"380519"`，原样抄进验证码框会校验失败。
 
 ### 5. SEO 产物与反向代理
 
@@ -129,8 +131,16 @@ location / {
 
 ```bash
 cp .env.example .env    # 逐项填写：凭据只在这里，仓库里只留模板
+
+# 先把六个基础镜像拉下来（见下面「为什么要先 pull」）
+docker pull mysql:8.4 && docker pull redis:7-alpine \
+  && docker pull maven:3.9-eclipse-temurin-21 && docker pull eclipse-temurin:21-jre-alpine \
+  && docker pull node:22-alpine && docker pull nginx:1.28-alpine
+
 docker compose up -d --build
 ```
+
+**为什么要先 pull**：国内镜像加速器普遍对 `HEAD /v2/.../manifests/...` 返 403，`docker pull` 撞上后会回落到上游、所以能成，而 BuildKit 解析 `FROM` 时不回退，直接 `failed to solve: unexpected status from HEAD request ... 403 Forbidden`。先把镜像拉到本地，BuildKit 就不必再问网络。另外 `cloudlog_api/Dockerfile` 用了 `--mount=type=cache`，**构建必须走 BuildKit**（Docker Desktop 默认就是）；`DOCKER_BUILDKIT=0` 会以 `Unknown flag: mount` 失败。
 
 MySQL 容器首次起跑会把 `docs/schema.sql` 导进新建的空库（只在数据目录为空时执行，真源不变）；演示数据 `docs/data.sql` 不在编排挂载里，需要时参照快速开始第 1 步手工导入。`api` 等 MySQL 与 Redis 变 healthy 才起跑，`web` 等 `api` 变 healthy 才起跑。站点入口只有 `web` 的 `${WEB_PORT:-80}` 一个端口，后端 8080 不对外发布。
 
@@ -141,7 +151,7 @@ docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATAB
   -e "UPDATE users SET role = 'admin' WHERE email = '你的注册邮箱'"
 ```
 
-没配真实 SMTP 时按第 4 步那样从 Redis 读验证码：`docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning GET "auth:code:你的邮箱"`。后端是无条件装配 `JavaMailSender` 的，所以 `SMTP_*` 留空会让容器起不来；填占位值则发码接口报错、但验证码已先写进 Redis，注册照样能完成。
+没配真实 SMTP 时按第 4 步那样从 Redis 读验证码：`docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning GET "auth:code:你的邮箱" | tr -d '\r"'`（`tr` 去掉的是 CR 与 JSON 序列化给 String 加上的那对双引号，见第 4 步）。后端是无条件装配 `JavaMailSender` 的，所以 `SMTP_*` 留空会让容器起不来；填占位值则发码接口报错、但验证码已先写进 Redis，注册照样能完成。占位值还有一处连带影响已由编排兜住：actuator 的 mail 健康指示器会去连 SMTP，连不上就整个 `/actuator/health` 返 503、api 恒 unhealthy、web 的 `depends_on: service_healthy` 永远等不到，所以 `application-prod.yml` 里关了 `management.health.mail`。
 
 验收走 `./deploy/verify-deploy.sh`：注册 → 发文 → 详情可读 → 三份 SEO 产物在域名根可达 → 自行清理容器与数据卷（`--keep` 保留现场）。
 
@@ -151,13 +161,15 @@ docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATAB
 - `deploy/api/application-prod.yml` 挂到 `/app/config/application-prod.yml`，与 jar 内同名文件**叠加**：本文件补齐「没有 `application.yml` 时会缺」的结构键，jar 内那份的三项收紧（SpringDoc 关闭、actuator 只留 `health`、日志压到 info 并落文件）照旧生效。
 - 为什么不干脆全部写成环境变量：`pagehelper.params=count=countSql` 这类标量值经环境变量传入会被当成字符串、绑不进 Map，启动即 `BindException`（以 Spring Boot 3.5.14 的 Binder 实测）。
 - **改 `application.example.yml` 的结构键要同步 `deploy/api/application-prod.yml`**，数据源 URL 上那组时区参数尤其要紧（口径与回归见 `DataSourceTimeZoneTest`）。
+- 构建阶段的 Maven 依赖走 `cloudlog_api/settings.xml`（阿里云 public 源），由 Dockerfile 的 `mvn -s ./settings.xml` 显式指定，`/root/.m2` 挂了 BuildKit 缓存卷所以那里没有 settings。原因是实测数据：容器网络里直连 `repo.maven.apache.org` 约 95 KB/s，且 2 MB 级的 jar 会被截断（`spring-security-config` 报 `Premature end of Content-Length delimited message body`，expected 2,108,224 / received 671,744）导致构建失败；同一批 jar 走这个源约 2.5 MB/s、三个大 jar 全部完整。要换成自己的私有源就改那个文件，别往 Dockerfile 里塞。
 
-### 四条差别与代价
+### 五条差别与代价
 
 1. **来源地址**：`APP_TRUST_FORWARDED_FOR` 在容器档里默认 `true`，前提是 api 的 8080 不对外发布、且 nginx 以覆盖方式写 `X-Forwarded-For`（两处配置都是这么写的）。一旦你把 8080 发布出去或改成追加式代理，必须改回 `false`，否则登录爆破计数与发码日额度就成了「换一个头换一个额度」。
-2. **时区**：镜像的 `JAVA_OPTS` 里钉了 `-Duser.timezone=Asia/Shanghai`。库里存的是北京墙钟，而评论频控、日志保留、SEO 产物这三处仍按 JVM 默认时区取「现在」（`business-model.md` §6 未决项），容器默认起在 UTC 就是静默偏 8 小时。
+2. **时区**：两侧都钉在北京墙钟上。JVM 侧靠镜像 `JAVA_OPTS` 里的 `-Duser.timezone=Asia/Shanghai`；MySQL 侧靠编排给 mysql 服务加的 `--default-time-zone=+08:00`。不加后者会偏 8 小时：`TIMESTAMP` 列存的是 UTC 秒、按**会话**时区渲染，应用连接被 JDBC 的 `forceConnectionTimeZoneToSession=true` 强制成 `+08:00`，而 initdb 与任何 `docker compose exec mysql mysql < 文件` 走的是服务端默认会话（容器里是 UTC），于是 CLI 导入的时间戳被应用整体读早 8 小时（实测：同一行 `10:11` 用 UTC 会话导入、被 `+08:00` 会话读成 `18:11`）。用数字偏移而不是 `Asia/Shanghai`，因为命名时区要 `mysql.time_zone` 表，容器里没导入会直接报 1298。评论频控、日志保留、SEO 产物这三处仍按 JVM 取「现在」（`business-model.md` §6 未决项）——钉完之后两侧同基，但「以哪个钟为准」本身仍是未决项。
 3. **Redis 不留盘**：编排里关掉 RDB/AOF，与「只放短时键、空实例即可」一致。但口令重置与登出推的 token 失效水位也在 Redis（§5.5），**重建 Redis 容器会让那批本该作废的旧 token 复活**；要在重启后仍保水位，就改 `command` 开 AOF 并给它加卷。
 4. **MinIO 不在默认起跑清单里**：2026-09 起 MinIO 停发免费 Docker 镜像（实测 Docker Hub 的 `minio/minio`、`minio/mc` 已 404，`quay.io/minio/minio` 匿名拉取 401），所以它排在 `--profile images` 后面，且镜像名由 `.env` 的 `MINIO_IMAGE` 提供——自备一个（自己构建，或可信镜像源里的同名镜像）再 `docker compose --profile images up -d`。图片链路另有两件仍是手工事：① 桶要设成匿名只读（后端只建桶、不设策略，控制台 9001 里点，或 `mc anonymous set download`）；② `MINIO_ENDPOINT` 会被拼进落库的图片绝对地址，**换值要回刷库**（`docs/db-design.md` §5.5），本机自测想让浏览器和后端都够得着它，得给一个两边都能解析的名字，正式上线填真实公网域名就天然一致。
+5. **api 的内存上限**：编排给 api 钉了 2 GiB。镜像里 `JAVA_OPTS` 的 `-XX:MaxRAMPercentage=75.0` 是按**容器可见内存**算堆上限的，不钉限额时它看到的是宿主总量（本机 7.75 GiB → 堆上限约 5.8 GiB），单实例博客用不到这个量，真涨上去是先把宿主挤死而不是自己 OOM。2 GiB 的依据是实测稳态 RSS 381 MiB：堆上限 1.5 GiB，余下约 500 MiB 给元空间与直接内存。`mysql` / `redis` / `web` 未钉限额，实测分别 474 / 10 / 10 MiB。
 
 ## 配置与敏感信息约定
 
@@ -198,24 +210,33 @@ java -jar target/*.jar --spring.profiles.active=prod
 
 ## 数据备份（必做）
 
-文章内容只存在于 MySQL，`LogRetentionService` 只负责清日志、不负责备数据——库损坏或误删等于内容全失。至少按天做一次逻辑备份：
+文章内容只存在于 MySQL，`LogRetentionService` 只负责清日志、不负责备数据——库损坏或误删等于内容全失。至少按天做一次逻辑备份。
+
+容器化部署走 `deploy/backup-db.sh`：凭据从仓库根 `.env` 取，`mysqldump` 在 mysql 容器里跑，宿主机不必装 mysql 客户端。
 
 ```bash
-# 手动备份（保留 14 天滚动）
+./deploy/backup-db.sh                # 备份到 ./backups，保留 14 天
+KEEP_DAYS=30 BACKUP_DIR=/var/backups/cloudlog ./deploy/backup-db.sh
+```
+
+挂进 crontab（每天 02:30，避开 03:30 的日志清理任务）：
+
+```cron
+30 2 * * * cd /path/to/cloudlog && ./deploy/backup-db.sh >> /var/log/cloudlog-backup.log 2>&1
+```
+
+这个脚本刻意不「跑完就算成功」：被截断的 dump 与完整备份长得几乎一样，只有尾部标记能区分，所以它逐项验 `gzip -t`、`-- Dump completed` 标记、以及库里的表数与 dump 里的建表语句数是否一致，任何一项不过就删掉那份文件并非零退出；落盘先写 `.part` 临时名再 `mv`，半途失败不会留下看着像备份的空壳。`backups/` 已进 `.gitignore`——dump 里有内容数据与口令哈希，绝不入库。
+
+非容器部署（宿主机直接跑 jar）用等价的手工命令：
+
+```bash
 mkdir -p /var/backups/cloudlog
 mysqldump -u root -p'你的数据库密码' --single-transaction --routines cloudlog \
   | gzip > /var/backups/cloudlog/cloudlog-$(date +%F).sql.gz
 find /var/backups/cloudlog -name '*.sql.gz' -mtime +14 -delete
 ```
 
-把这两行挂进 crontab（每天 02:30，避开 03:30 的日志清理任务）：
-
-```cron
-30 2 * * * mysqldump -u root -p'你的数据库密码' --single-transaction cloudlog | gzip > /var/backups/cloudlog/cloudlog-$(date +\%F).sql.gz
-30 2 * * * find /var/backups/cloudlog -name '*.sql.gz' -mtime +14 -delete
-```
-
-`--single-transaction` 保证 InnoDB 下备份不锁表；恢复：`gunzip < 备份文件 | mysql -u root -p cloudlog`。MinIO 里的图片建议按 bucket 周期快照或双桶镜像，量小可接受时也可与 `mysqldump` 同频用 `mc mirror` 同步。
+`--single-transaction` 保证 InnoDB 下备份不锁表。恢复：容器化是 `gunzip < 备份文件 | docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" cloudlog`，非容器是 `gunzip < 备份文件 | mysql -u root -p cloudlog`。MinIO 里的图片建议按 bucket 周期快照或双桶镜像，量小可接受时也可与 `mysqldump` 同频用 `mc mirror` 同步。
 
 ## 持续集成
 

@@ -34,3 +34,6 @@ cloudlog_api/src/main/resources/application*.yml
 # 项目本地工作流目录（docs/ 下的正式文档照常入库）
 .hallmark/
 .zcode/
+
+# 数据库备份产物：deploy/backup-db.sh 的默认落盘位置，里面有内容数据与口令哈希，绝不入库
+backups/
