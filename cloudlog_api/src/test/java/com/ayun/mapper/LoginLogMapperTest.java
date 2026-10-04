@@ -78,7 +78,8 @@ class LoginLogMapperTest {
     @Test
     @DisplayName("三张计数卡与明细对得上：今日失败不含成功、今日锁定只数 locked、来源按邮箱+地址去重")
     void overviewCardsReconcileWithTheRows() {
-        LocalDateTime now = LocalDateTime.now();
+        // 造数取会话自己的 NOW()：窗口谓词是 DATE_SUB(NOW(), INTERVAL 1 HOUR)，按 JVM 默认时区造的行在 UTC 机器上会落到窗口外
+        LocalDateTime now = jdbcTemplate.queryForObject("SELECT NOW()", LocalDateTime.class);
         int baseFailures = loginLogMapper.countTodayFailures();
         int baseLocked = loginLogMapper.countTodayLocked();
         int baseSources = loginLogMapper.countRecentFailureSources();

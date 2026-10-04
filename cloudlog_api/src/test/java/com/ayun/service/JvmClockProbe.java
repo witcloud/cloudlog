@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 时区探针：把 JVM 默认时区钉成 UTC 再跑一段被测代码。
  * 本站的时刻口径是「库里存北京墙钟」（db-design.md §1「不做 UTC 存储」），而 JVM 默认时区由部署环境决定，
- * 本机与 CI 都是 +08:00，跟着默认时区走的写法在本地永远测不出来——只有把默认值改成 UTC，
+ * 本机在 +08 上两种写法算出同一个瞬间、永远测不出来（CI 的 runner 默认是 UTC）——只有把默认值显式改成 UTC，
  * 「代码问错了时钟」才会变成一次失败
  */
 final class JvmClockProbe {

@@ -237,12 +237,14 @@ class ArticleServiceTest {
         PostUpdateDTO updateDTO = new PostUpdateDTO();
         updateDTO.setStatus("published");
 
-        LocalDateTime before = LocalDateTime.now();
+        // 「现在」两侧都取业务时区：updatePost 写的是 businessNow()，混用 JVM 基会在 UTC 机器上把它读成「未来」
+        LocalDateTime before = LocalDateTime.now(ArticleService.BUSINESS_ZONE);
         articleService.updatePost(3L, updateDTO);
 
         LocalDateTime publishedAt = stored.getPublishedAt();
         assertNotEquals(planned, publishedAt, "未来计划时刻原样落库会让前台显示「发布于未来」");
-        assertFalse(publishedAt.isAfter(LocalDateTime.now()), "覆写的应是本次流转的时刻，不该仍在未来");
+        assertFalse(publishedAt.isAfter(LocalDateTime.now(ArticleService.BUSINESS_ZONE)),
+                "覆写的应是本次流转的时刻，不该仍在未来");
         assertFalse(publishedAt.isBefore(before), "覆写的应是本次流转的时刻，不该早于本次调用");
     }
 
