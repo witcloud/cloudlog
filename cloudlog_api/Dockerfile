@@ -10,10 +10,16 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /src
 COPY pom.xml ./
+# 容器里没有宿主 ~/.m2 的缓存，整棵依赖树要现下；直连中央仓库实测约 95 KB/s 且会把 2 MB 的 jar
+# 截断，构建失败在依赖解析上，所以显式换一个国内源（理由与实测数字写在该文件头部注释里）
+COPY settings.xml ./
 COPY src ./src
 # 测试要外部 MySQL/Redis（business-model.md §3.3「自动化测试」），回归由 .github/workflows/ci.yml 兜底，
-# 构建阶段只打包
-RUN mvn -B -DskipTests package
+# 构建阶段只打包。
+# --mount=type=cache 让依赖跨构建复用（只有 BuildKit 支持这一行；compose 在 Docker Desktop 上默认就是
+# BuildKit，若改用经典构建器这行会以 Unknown flag: mount 失败）；缓存卷是空目录起步，所以 settings.xml
+# 用 -s 显式指，不能指望 ~/.m2 里那份
+RUN --mount=type=cache,target=/root/.m2 mvn -B -s ./settings.xml -DskipTests package
 
 FROM eclipse-temurin:21-jre-alpine AS runtime
 

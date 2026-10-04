@@ -50,6 +50,13 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      # 服务容器起的 cloudlog 是空库，而 mapper 与过滤链那批用例读的是库里已有的行：
+      # 只导 schema.sql 实测红 21 条（CommentGuard/CommentList/PostList/SeoPublic/VisitLog/TokenRevocation 六个类），
+      # schema.sql + data.sql 一起导实测 352/352 全绿。data.sql 在这里是 fixture，不是演示数据
+      - name: 导入库结构与测试数据（docs/schema.sql 是结构唯一真源）
+        run: |
+          mysql --default-character-set=utf8mb4 -h 127.0.0.1 -uroot -proot cloudlog < docs/schema.sql
+          mysql --default-character-set=utf8mb4 -h 127.0.0.1 -uroot -proot cloudlog < docs/data.sql
       - name: 测试
         working-directory: cloudlog_api
         run: mvn -B test

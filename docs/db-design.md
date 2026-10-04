@@ -403,7 +403,7 @@
 | `posts` | `idx_status_time` | `(status, published_at)` | 普通 | **前台列表可见性过滤 + 定时发布扫描**；支撑「`status='published'` 按发布时刻排序」 |
 | `posts` | `idx_author` | `author_id` | 普通 | 后台按作者筛选、`countByAuthor` |
 | `posts` | `idx_category` | `category_id` | 普通 | 分类维度列表、分类文章数即时统计 |
-| `posts` | `ft_title_content` | `(title, content)` | **FULLTEXT**（`WITH PARSER ngram`） | 站内搜索满 2 字的关键词；依赖 `ngram_token_size`（MySQL 8 默认 2），故单字查询仍走 `idx_*` + LIKE，见 §4.3 |
+| `posts` | `ft_title_content` | `(title, content)` | **FULLTEXT**（`WITH PARSER ngram`） | 站内搜索不含 ASCII 字母与符号、满 2 字的关键词；依赖 `ngram_token_size`（MySQL 8 默认 2），且默认停用词表的单字母 `a`/`i` 会被 ngram 当分隔符、含英文/符号的关键词切不出词元，这类关键词与单字查询一样退回 `idx_*` + LIKE，见 §4.3 |
 | `post_tags` | 主键 | `(post_id, tag_id)` | PRIMARY | 按文章装载标签；同文章同标签去重 |
 | `comments` | 主键 | `id` | PRIMARY | 按 id 定位评论 |
 | `comments` | `idx_post_id` | `post_id` | 普通 | 前台文章评论列表（根 + 回复装载） |
@@ -430,7 +430,7 @@
 
 - 不给 `status`、`is_top`、`role` 这类低基数列**单独**建索引（值域极小，选择性不足，只会增加写放大）。`status` 只出现在联合索引的最左列。
 - 不给 `banned_words.is_enabled`、`banned_words.action` 建索引：机审要的是「全部启用词」，本就是一次小表全取再进进程内缓存（§2.12），索引救不了它；后台按 `word` 的模糊搜索是 `LIKE '%kw%'`，前缀通配同样走不上索引。
-- `posts.title` + `posts.content` 的全文索引**已建**（2026-10-03 由用户裁决移出本条禁令，见 §4.1 与 §4.4）：`FULLTEXT KEY ft_title_content (title, content) WITH PARSER ngram`。它只是 InnoDB 内建的倒排索引，不是外部搜索引擎，因此不触碰 business-model.md §5.7 第 5 条那条禁令。搜索侧的分支写在 `PostMapper.xml` 的 `findAllBrief`：关键词满 2 字走 `MATCH…AGAINST(… IN BOOLEAN MODE)`，单字仍退回 `LIKE`（ngram 词元就是两个字符，单字进不了索引）。
+- `posts.title` + `posts.content` 的全文索引**已建**（2026-10-03 由用户裁决移出本条禁令，见 §4.1 与 §4.4）：`FULLTEXT KEY ft_title_content (title, content) WITH PARSER ngram`。它只是 InnoDB 内建的倒排索引，不是外部搜索引擎，因此不触碰 business-model.md §5.7 第 5 条那条禁令。搜索侧的分支写在 `PostMapper.xml` 的 `findAllBrief`，分岔条件收敛在 `FulltextKeywordUtils.isIndexable`：只把**不含 ASCII 字母与符号、满 2 字**的关键词交给 `MATCH…AGAINST(… IN BOOLEAN MODE)`，其余退回 `LIKE`。原因有二：ngram 词元固定两个字符，单字进不了索引；更关键的是 ngram 分词会套用停用词表（`innodb_ft_enable_stopword` 默认开），默认表里的单字母 `a`/`i` 在分词时被当成分隔符——"Mac" 切不出词元、根本进不了倒排索引，含英文/符号（"C++"）或恰为双字符停用词（of/to）的关键词走 MATCH 必然 0 命中，且无法在查询侧绕开。LIKE 是子串语义，命中范围恒为 MATCH 的超集；博客量级下 `%kw%` 扫描可接受，这个取舍是 2026-10-04 验证 MySQL 8.4 实测行为后定的。
 - 不给 `excerpt`、`bio`、`description` 建全文索引：它们要么是正文的摘录、要么是短文案，没有独立的检索需求。
 - 不给 `visit_logs.ip`、`user_agent` 建索引。2026-10-03 启用后这两列确实进了检索条件（明细按地址前缀 `LIKE '112.10.%'`、按 UA 关键词 `LIKE '%kw%'`），但仍不建：**UA 那侧前缀通配本来就上不了 B-tree 索引**；地址那侧理论上 `LIKE '前缀%'` 能用，代价是每次访问多一列写放大，而这类查询总是先被 `idx_created_at` 的时间范围收窄到几百到几千行，扫这点行的成本远低于让索引常驻。要加，先拿出慢查询证据（同 §4.4 的口径）。同一判断适用于 `login_logs.ip` 与 `login_logs.user_agent`（§2.13）：登录尝试的量级比访问小一到两个数量级，更没有为地址前缀单开索引的理由。
 - 不为「以后可能按 X 查」预留索引。
@@ -530,7 +530,7 @@
 - 实体对象上的关联装载字段（文章的作者/分类/标签、评论的用户/回复列表）**都不是数据库列**，不要为它们建列，也不要据它们建表。
 - 时间序列化：`TIMESTAMP` 列映射为 `LocalDateTime`，响应为 ISO 格式；`publishTime` 的对外契约格式是 `yyyy-MM-dd HH:mm:ss`（属接口契约，不改变列类型）。不引入 `java.util.Date`，不用 `DATETIME`。
 - 删除均为硬删（§1.4），跨表删除必须在同一事务里按「先删关联/子行，再删主行」顺序显式执行。
-- **schema 只有一个真源：`docs/schema.sql`**，它是最终态全量 DDL，全新安装直接执行。曾经配套的两个增量升级脚本（给按旧版建过的库补漂移用）已删除——它们的内容早已并进全量建表语句，留着只会让同一件事记两遍账。开发阶段的库表变更一律**直接改 `docs/schema.sql` 并清库重建**（§1.1.1），不要生成「全量 + 增量清单」两套脚本。
+- **schema 只有一个真源：`docs/schema.sql`**，它是最终态全量 DDL，全新安装直接执行。曾经配套的两个增量升级脚本（给按旧版建过的库补漂移用）已删除——它们的内容早已并进全量建表语句，留着只会让同一件事记两遍账。开发阶段的库表变更一律**直接改 `docs/schema.sql` 并清库重建**（§1.1.1），不要生成「全量 + 增量清单」两套脚本。演示/测试数据与此分开，单独放在 `docs/data.sql`：只含 INSERT、不承载任何结构，必须在空库导入 schema 之后执行一次（事务包裹），重复导入撞主键；它不参与结构真源，也不改变本节口径。
 - 单实例部署：**不引入分布式锁、幂等表、任务执行记录表**。定时任务的幂等性由 SQL 谓词本身保证（第二次执行影响 0 行）。
 
 ---

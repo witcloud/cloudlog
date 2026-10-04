@@ -15,7 +15,9 @@ export default defineConfigWithVueTs(
     files: ['**/*.{vue,ts,mts,tsx}'],
   },
 
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
+  // .vite 是 Vite 的依赖预构建缓存（构建或起过 dev server 后出现，已 gitignore）：
+  // 不挡掉的话 `npm run lint` 会把 element-plus 的生成产物当源码报 18 条规则错
+  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**', '**/.vite/**']),
 
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,

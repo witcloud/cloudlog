@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  容器构建专用的 Maven 源配置，由 cloudlog_api/Dockerfile 用 `mvn -s ./settings.xml` 显式指定。
+
+  为什么不是直接用中央仓库：本机构建上下文里没有宿主 ~/.m2 的缓存，整棵依赖树要现下，
+  实测在容器网络里 repo.maven.apache.org 只有约 95 KB/s，且 2 MB 级的 jar 会被截断
+  （spring-security-config 报 Premature end of Content-Length delimited message body，
+  expected 2,108,224 / received 671,744），`mvn package` 直接失败在解析依赖阶段。
+  同一批 jar 走下面这个源实测约 2.5 MB/s、三个大 jar 全部完整。
+
+  为什么写成文件而不是 -Dmaven.repo.remote 之类的参数：Maven 的 mirror 只能由 settings.xml 声明。
+  为什么显式 -s 而不是放进 ~/.m2：构建层给 /root/.m2 挂了 BuildKit 缓存卷，那个目录在构建开始时是空的，
+  放在里面的 settings.xml 不会存在。
+
+  这里不含任何凭据——公开镜像源匿名只读，私有仓库的 server 段不要往这个文件里加。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <mirrors>
+    <mirror>
+      <id>aliyun-public</id>
+      <name>Aliyun public repository (aggregates Maven Central)</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+      <mirrorOf>central</mirrorOf>
+    </mirror>
+  </mirrors>
+
+</settings>

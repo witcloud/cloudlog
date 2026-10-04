@@ -12,7 +12,7 @@ cloudlog/
 ├── cloudlog_api/ # 后端项目（Spring Boot 3.5 + MyBatis）
 │   └── Dockerfile      # maven 构建 → JRE 21 运行
 ├── deploy/ # 容器化部署：挂载进 api 的结构配置 + 最小闭环验证脚本
-├── docs/ # 项目规范（业务模型 / 数据库设计 / UI 设计）与 schema.sql（建表真源）
+├── docs/ # 项目规范（业务模型 / 数据库设计 / UI 设计）、schema.sql（建表真源）与 data.sql（演示数据）
 ├── docker-compose.yml # 单实例编排：MySQL + Redis + 后端 + 前端（MinIO 见 --profile images）
 ├── .env.example # 容器部署的凭据模板（复制为 .env，.env 不入库）
 ├── README.md
@@ -53,6 +53,14 @@ mysql -u root -p cloudlog < docs/schema.sql
 
 库名默认 `cloudlog`，与 `application.example.yml` 的数据源 URL 一致。`docs/schema.sql` 是数据库唯一真源，最终态全量 DDL（`posts` 的 ngram 全文索引已在建表语句里）；结构变更直接改该文件并清库重建，不保留面向存量库的增量升级脚本。
 
+需要演示数据时（可选）：
+
+```bash
+mysql -u root -p cloudlog < docs/data.sql
+```
+
+`docs/data.sql` 是一份自包含的演示/测试数据集（11 张表共 339 行）：23 个用户（2 个 admin + 21 个普通用户，含 1 个禁用账号）、28 篇覆盖四态（draft / published / scheduled / offline）与置顶、未分类、多作者的中文技术文章，以及三态评论（含两级回复与匿名评论）、点赞、访问日志、关注关系与违禁词库。所有账号密码均为 `123456`，博主账号 `tcloud@example.com`。其中两个小 ID 账号（`author@example.com`、`alex@example.com`）是为 mapper 层与过滤链测试写死的取值补的锚点，理由写在文件内 §12 的注释里。它只含 INSERT（事务包裹，一次成功或整体回滚），不建表也不删表——必须在 `schema.sql` 之后、且只在空库上导入一次，重复执行会主键冲突；结构变更后需重新生成该文件。
+
 ### 2. 后端（cloudlog_api/）
 
 ```bash
@@ -81,7 +89,7 @@ npm run dev
 
 ### 4. 注册账号并提升为首任博主
 
-打开前台注册一个账号，再把它提成博主。这一步是必需的：注册接口固定写 `role = 'user'`（`AuthService.java:96`），后台的用户管理只有列表与启用/禁用两项、改不了角色（`AdminUserController`），`docs/schema.sql` 也不预置任何账号——所以首个以及此后每一个管理员都要这样手工提升，界面上没有入口。
+打开前台注册一个账号，再把它提成博主。这一步是必需的：注册接口固定写 `role = 'user'`（`AuthService.java:96`），后台的用户管理只有列表与启用/禁用两项、改不了角色（`AdminUserController`），`docs/schema.sql` 也不预置任何账号——所以首个以及此后每一个管理员都要这样手工提升，界面上没有入口。（例外：若第 1 步导入了演示数据 `docs/data.sql`，库里已有现成博主 `tcloud@example.com`，密码 `123456`，本步可跳过。）
 
 ```bash
 mysql -u root -p cloudlog -e "UPDATE users SET role = 'admin' WHERE email = '你的注册邮箱'"
@@ -124,7 +132,7 @@ cp .env.example .env    # 逐项填写：凭据只在这里，仓库里只留模
 docker compose up -d --build
 ```
 
-MySQL 容器首次起跑会把 `docs/schema.sql` 导进新建的空库（只在数据目录为空时执行，真源不变）；`api` 等 MySQL 与 Redis 变 healthy 才起跑，`web` 等 `api` 变 healthy 才起跑。站点入口只有 `web` 的 `${WEB_PORT:-80}` 一个端口，后端 8080 不对外发布。
+MySQL 容器首次起跑会把 `docs/schema.sql` 导进新建的空库（只在数据目录为空时执行，真源不变）；演示数据 `docs/data.sql` 不在编排挂载里，需要时参照快速开始第 1 步手工导入。`api` 等 MySQL 与 Redis 变 healthy 才起跑，`web` 等 `api` 变 healthy 才起跑。站点入口只有 `web` 的 `${WEB_PORT:-80}` 一个端口，后端 8080 不对外发布。
 
 注册账号并提升为首任博主的口径与上面第 4 步一样（界面上没有改角色的入口），只是命令换成走容器：
 

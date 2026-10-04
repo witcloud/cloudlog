@@ -89,13 +89,16 @@
             </if>
             <if test="keyword != null and keyword != ''">
                 <choose>
-                    <!-- 满 2 字才交给全文索引：ngram 的词元就是 2 个字符，1 字的词压根不在索引里，
-                         MATCH 对它必然 0 命中，所以短词必须留在 LIKE 分支 -->
-                    <when test="keyword.length() >= 2">
+                    <!-- 全文索引只收「不含 ASCII 字母与符号、满 2 字」的关键词，判定与依据见 FulltextKeywordUtils。
+                         ngram 分词会套用停用词表，默认表里的单字母 a/i 被当成分隔符："Mac" 切不出词元、
+                         根本进不了倒排索引，含英文/符号的关键词走 MATCH 必然 0 命中（标题带 Mac 的文章搜「Mac」
+                         返回 0 篇即此因）；of/to 这类双字符停用词同理。这些失败类无法在查询侧绕开，只能分岔：
+                         LIKE 是子串语义，命中范围恒为 MATCH 的超集，博客量级下 %kw% 扫描成本可接受 -->
+                    <when test="@com.ayun.common.FulltextKeywordUtils@isIndexable(keyword)">
                         <!-- BOOLEAN MODE + 双引号短语：把关键词整体当子串匹配。
-                             裸值进布尔模式会被 + - * " ( ) ~ & | ! 当成运算符解释，读者搜「C++」或「-5」就会查错甚至查崩，
+                             裸值进布尔模式会被 + - * " ( ) ~ & | ! 当成运算符解释，搜「-5」就会查错甚至查崩，
                              所以先摘掉内嵌的双引号再整体加引号；不用自然语言模式是因为它有 50% 出现率的停用阈值，
-                             库小的时候高频词会莫名其妙搜不到 -->
+                             库小的时候高频词会莫名其妙搜不到。能进本分支的关键词已不含 ASCII，运算符风险只剩全角混排里的内嵌引号 -->
                         AND MATCH(p.title, p.content) AGAINST(CONCAT('"', REPLACE(#{keyword}, '"', ''), '"') IN BOOLEAN MODE)
                     </when>
                     <otherwise>
