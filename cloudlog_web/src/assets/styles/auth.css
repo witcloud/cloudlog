@@ -38,9 +38,11 @@
   color: var(--color-accent);
 }
 
+/* el-form-item__content 本身是 flex，不写 width 这块就缩到内容宽，按钮右缘会短于其他字段 */
 .auth-code-input {
   display: flex;
   gap: var(--space-sm);
+  width: 100%;
 }
 
 .auth-code-input .el-input {
