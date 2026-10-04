@@ -655,7 +655,9 @@ onMounted(() => {
   window.addEventListener('beforeunload', onWindowUnload)
   window.addEventListener('online', onNetChange)
   window.addEventListener('offline', onNetChange)
-  initVditor()
+  // 空白起稿：构造早于本页取数，此刻 store 还挂着上一次编辑会话的那篇；
+  // 拿它播种，新建时清空的正文就写不回去（after 只推非空值）→ 编辑区留着上一篇的字
+  initVditor('')
   loadArticleData(route.params.id as string)
   startAutoSave()
 })
@@ -802,13 +804,13 @@ const toggleTypewriter = () => {
   rebuildVditor()
 }
 
-const initVditor = (initialValue?: string) => {
+const initVditor = (initialValue: string) => {
   if (!vditorEl.value) return
   vditor = new Vditor(vditorEl.value, {
     cdn: '/vditor',
     lang: 'zh_CN',
     mode: 'ir',
-    value: initialValue ?? article.content ?? '',
+    value: initialValue,
     placeholder: '开始你的创作…',
     theme: isDark.value ? 'dark' : 'classic',
     height: 'auto',
