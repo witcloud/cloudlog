@@ -80,6 +80,14 @@ server:
   servlet:
     context-path: /api/v1
 
+# 健康检查不去连 SMTP：邮箱服务商不可达只是发不出验证码，不该把整个实例判 DOWN。
+# 容器编排里 /actuator/health 是 api→web 的启动硬依赖，被拖 DOWN 会让 web 永远等不到
+# （容器档由 deploy/api/application-prod.yml 同样关闭，两处口径一致）
+management:
+  health:
+    mail:
+      enabled: false
+
 springdoc:
   api-docs:
     path: /v3/api-docs
