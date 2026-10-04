@@ -60,16 +60,17 @@
         </div>
 
         <!-- 正文页脚：标签在左、互动按钮在右，共用上方那条发丝线。
-             互动按钮是同一组的第二副面孔——≥84rem 它钉在容器左侧成竖栏，不足时顺流落在这里 -->
+             互动按钮是同一组的第二副面孔——≥60rem 它钉在屏幕左侧成竖栏，不足时顺流落在这里 -->
         <div class="article-detail__foot">
         <nav v-if="article.tags?.length" class="article-detail__tags" aria-label="文章标签">
+          <span class="article-detail__tags-label">标签：</span>
           <RouterLink
             v-for="tag in article.tags"
             :key="tag.id"
             class="article-detail__tag"
             :to="{ path: '/', query: { tagId: tag.id } }"
           >
-            #{{ tag.name }}
+            {{ tag.name }}
           </RouterLink>
         </nav>
       <nav class="article-floatbar" aria-label="文章快捷操作">
@@ -454,14 +455,14 @@ const handleBack = () => {
 }
 
 // ---- 左侧悬浮操作栏：常驻；作者头像仅在 author-card 完全离开可视区域时显示 ----
-/** ≥84rem 容器外才有留白放竖栏；不足时同一组按钮换成正文末尾的一行，分享气泡的开口方向跟着换 */
-const railQuery = window.matchMedia('(min-width: 84rem)')
+/** ≥60rem 竖栏成列（与右栏同生同灭，窄到汉堡那一档才换）；不足时同一组按钮换成正文末尾的一行，分享气泡的开口方向跟着换 */
+const railQuery = window.matchMedia('(min-width: 60rem)')
 const railWide = ref(railQuery.matches)
 const onRailChange = (event: MediaQueryListEvent) => {
   railWide.value = event.matches
 }
 
-/** ≥84rem 竖栏是 position: fixed，浮层得同它一起锚视口才不会「漂一下再复位」；
+/** ≥60rem 竖栏是 position: fixed，浮层得同它一起锚视口才不会「漂一下再复位」；
    窄屏时这组按钮落回正文流里，absolute 才与触发点同步，fixed 反倒会脱开 */
 const sharePopperOptions = computed(() => ({
   strategy: railWide.value ? ('fixed' as const) : ('absolute' as const),
@@ -651,9 +652,11 @@ const shareTo = (platform: 'weibo' | 'copy') => {
 
 /* 正文与评论各自独立成面（卡片范式 docs/ui-design.md §6.2）：
    paper 与 paper-2 只差 1.5% L，分层靠发丝线描边 + 一枚极轻阴影 */
-/* 正文卡收在 --measure-prose、与右栏整组居中：文字列 688px ≈ 43 字/行，与编辑器写作面同宽，
-   两端换行位置一致，「所见即所得」成立。容器余量归还两侧——≥84rem 那一侧由悬浮栏占用，
-   不再让正文撑满主栏摊到 53 字/行；评论卡与正文卡同轨同内衬，文字左缘上下对齐 */
+/* 正文卡撑满主栏轨道（右栏 15rem 定宽，余量给正文、不留两侧空带）：
+   文字列 = 轨道宽 − 两档 --space-lg 内衬，容器外留白充裕时是 840px ≈ 52 字/行；
+   留白被竖栏吃光之后改由这条左内衬让位（见 .article-detail 那一档），文字列跟着收窄。
+   这一档刻意不再与编辑器写作面（--measure-prose，文字列 688px）同宽，两端换行位置不同；
+   评论卡与正文卡同让，文字左缘上下对齐 */
 .article-detail__main {
   min-width: 0;
   display: flex;
@@ -796,8 +799,15 @@ const shareTo = (platform: 'weibo' | 'copy') => {
 /* 标签 chip：凹陷面小药丸（主流平台的 tag 形态），hover 洗染 + 强调色 */
 .article-detail__tags {
   display: flex;
+  /* 标签是 flex 项，默认 stretch 会把它撑到芯片高、文字顶到顶上，比芯片字面高 2px */
+  align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2xs);
+}
+
+.article-detail__tags-label {
+  font-size: var(--text-sm);
+  color: var(--color-ink-3);
 }
 
 .article-detail__tag {
@@ -831,13 +841,13 @@ const shareTo = (platform: 'weibo' | 'copy') => {
   scroll-margin-top: calc(var(--header-h) + var(--space-md));
 }
 
-/* ---- 左侧悬浮操作栏：≥84rem 钉在容器外留白里成竖栏；不足时顺流在正文之后成一行 ---- */
+/* ---- 左侧悬浮操作栏：≥60rem 成竖栏钉在屏幕左侧（留白不够时钉在窗缘、压正文宽度）；不足时顺流在正文之后成一行 ---- */
 .article-floatbar {
   display: none;
 }
 
 /* 窄屏换的那副面孔：竖栏专属的「返回」与「回顶看作者」收掉，只留互动三件 */
-@media (max-width: 83.9375rem) {
+@media (max-width: 59.9375rem) {
   .article-floatbar {
     display: flex;
     align-items: center;
@@ -851,12 +861,37 @@ const shareTo = (platform: 'weibo' | 'copy') => {
   .article-floatbar .article-floatbar__comments {
     display: none;
   }
+
+  /* P6 的密度换档：这一档整组按钮落进正文页脚那一行，与 13px 的标签芯片同排，
+     40px 的圆会把行高从 27px 顶到 40px。缩的是画出来的圆（→32px），
+     触点用 ::before 补回 2.5rem——与竖栏那副面孔的可见圆同档，手指能点到的面积不跟着缩。
+     尺寸写在伪元素自己身上而不是 inset：inset 从 padding box 起算，会被 1px 描边吃掉一圈（实测只剩 38px）。
+     不补到 44px：两枚触点会在 12px 的间距里正好相切，误触就落在另一个动作上 */
+  .article-floatbar .article-floatbar__btn {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .article-floatbar .article-floatbar__btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2.5rem;
+    height: 2.5rem;
+    transform: translate(-50%, -50%);
+  }
 }
 
-@media (min-width: 84rem) {
+@media (min-width: 60rem) {
   .article-floatbar {
-    /* 右缘距容器左缘 2rem：容器外留白 = (100vw - 72rem) / 2，84rem 视口起恰好容纳 */
-    --rail-left: calc((100vw - var(--container-max)) / 2 - var(--space-2xl) - var(--space-md));
+    /* 落点 = 卡片左缘再往外 96px（离文 --space-xl + 栏身 2.75rem + 离窗 --space-sm）。
+       留白够时它整个待在卡外；留白吃掉 96px 之后就钉在离窗 12px 处不再右移，
+       改由两张卡让左内衬去压正文宽度（见 .article-detail 那一档） */
+    --rail-left: max(
+      var(--space-sm),
+      calc(var(--gutter) - var(--space-xl) - 2.75rem)
+    );
 
     position: fixed;
     left: var(--rail-left);
@@ -1075,10 +1110,25 @@ button.article-missing__action {
 
 @media (min-width: 60rem) {
   .article-detail {
-    /* 正文轨道封顶 --measure-prose、整组居中：文字列与编辑器写作面同宽（换行一致），
-       窄容器（60–65rem 视口）先让正文轨道收缩，不会溢出 */
-    grid-template-columns: minmax(0, var(--measure-prose)) 15rem;
-    justify-content: center;
+    /* 右栏 15rem 定宽，容器余量全给正文轨道：整组不居中，两侧不留空带。
+       窄容器（60–65rem 视口）由 minmax(0, 1fr) 先收缩正文轨道，不会溢出 */
+    grid-template-columns: minmax(0, 1fr) 15rem;
+
+    /* 卡片左缘离窗口多远 = 容器内容缘；容器贴边之后就是它自己的 --space-lg 内衬。
+       悬浮竖栏与下面那条左内衬都读这一个值，两者不会各算各的 */
+    --gutter: max(var(--space-lg), (100vw - var(--container-max)) / 2);
+  }
+
+  /* 留白吃光之后，钉住的是**卡片左缘本身**，不是文字：整块面板被推到离窗 96px 处就不再往左爬，
+     竖栏留在它左边那条 96px 带里，两者永远不重叠。96px = 离窗 12 + 栏身 2.75rem + 栏卡间距 40。
+     卡片是 flex 列里的 stretch 项，只加 margin-inline-start → 右缘不动、左缘被顶开，
+     收窄的是面板宽度（正文跟着窄）。两张卡同让，边框与文字左缘都继续上下对齐 */
+  .article-detail__post,
+  .article-detail__comments {
+    margin-inline-start: max(
+      0px,
+      calc(var(--space-sm) + 2.75rem + var(--space-xl) - var(--gutter))
+    );
   }
 }
 </style>
