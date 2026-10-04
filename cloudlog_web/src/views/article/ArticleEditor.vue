@@ -229,6 +229,8 @@ import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 import { MdPreview } from 'md-editor-v3'
 // 预览面的排版基座：原先由详情页懒加载路由注入，直接进编辑器时预览会缺这套样式
+// style.css 要留在 preview.css 之前：它独家提供 .md-editor-preview-wrapper 那三条规则
+import 'md-editor-v3/lib/style.css'
 import 'md-editor-v3/lib/preview.css'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { ElMessage, ElMessageBox } from 'element-plus'

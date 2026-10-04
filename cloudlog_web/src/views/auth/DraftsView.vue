@@ -47,7 +47,7 @@
       </el-input>
 
       <el-select v-model="queryParams.year" placeholder="年份" class="drafts__select">
-        <el-option label="不限年份" :value="null" />
+        <el-option label="不限年份" :value="NO_FILTER" />
         <el-option v-for="y in years" :key="y" :label="`${y} 年`" :value="y" />
       </el-select>
 
@@ -56,7 +56,7 @@
         placeholder="月份"
         class="drafts__select drafts__select--month"
       >
-        <el-option label="不限月份" :value="null" />
+        <el-option label="不限月份" :value="NO_FILTER" />
         <el-option v-for="m in 12" :key="m" :label="`${m} 月`" :value="m" />
       </el-select>
 
@@ -170,6 +170,11 @@ const queryParams = reactive<DraftListParams>({
   keyword: null,
   status: null,
 })
+
+// 「不限年份/月份」这两档的哨兵值。写成常量而不是直接在模板里传 null：按需引入后 el-option 的 value
+// 走组件真实类型（Boolean|Object|String|Number，不收 null），而 null 正是这里要的语义——
+// 下面既用 !!queryParams.year 判真假，也在提交前把空值归一成 null。取值一个字没改
+const NO_FILTER = null as unknown as number
 
 type StatusView = { label: string; value: 'draft' | 'scheduled' | null; count: number }
 

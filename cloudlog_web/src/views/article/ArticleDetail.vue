@@ -242,6 +242,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MdPreview } from 'md-editor-v3'
 import { sanitizeHtml } from '@/utils/sanitize'
+// style.css 里有 preview.css 缺的三条 .md-editor-preview-wrapper 规则（MdPreview 的根元素），
+// 必须留在 preview.css 之前以保持原有级联顺序。它原先挂在 main.ts 上，等于让每个页面
+// 都为文章页的样式付 68.6 kB，所以搬到真正用 MdPreview 的这两个视图里
+import 'md-editor-v3/lib/style.css'
 import 'md-editor-v3/lib/preview.css'
 import qrcode from 'qrcode-generator'
 import { setSeoMeta, canonicalUrl, toIso8601 } from '@/utils/seo'

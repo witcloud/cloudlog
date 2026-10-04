@@ -169,16 +169,19 @@ const props = withDefaults(
 
 /** EP 默认给 flip 四个候选，而 popper 每次 update 都会重跑 flip（_skip 随 forceUpdate 复位），
    设置栏滚动时选择框上下移，浮层就在 bottom/top 之间来回翻面。只留一个候选即钉死朝下。 */
-const selectFallbackPlacements = ['bottom-start']
+// 写成字面量类型而不是裸数组：按需引入后模板改用组件的真实 props 类型（el-select 的 fallback-placements
+// 是 Placement[]、popper-options 是 Partial<Options>），原先全量注册那份 global.d.ts 的宽松 any 不再兜住，
+// 裸数组会被推成 string[]。值一个没改，只是让 TS 认得它们
+const selectFallbackPlacements: ('bottom-start')[] = ['bottom-start']
 
 /** 设置栏钉在视口上，absolute 的浮层却按文档坐标定位，页面一滚它先跟着文档走、
    等 popper 回算才弹回来贴上（看着就是漂一下复位）。fixed 直接锚视口，没有这个瞬时态——与顶栏「创作」下拉同一处理；
    下面两个日期/时间弹层各自带了 modifiers，所以同一条 strategy 写在那里 */
-const selectPopperOptions = { strategy: 'fixed' }
+const selectPopperOptions = { strategy: 'fixed' as const }
 
 /** 时间选择弹出层：与屏幕边缘保持留白，防止时间滚轮展开后顶出屏幕 */
 const datetimePopperOptions = {
-  strategy: 'fixed',
+  strategy: 'fixed' as const,
   modifiers: [
     { name: 'offset', options: { offset: [-8, 8] } },
     { name: 'preventOverflow', options: { padding: 12, rootBoundary: 'viewport' } },
@@ -187,7 +190,7 @@ const datetimePopperOptions = {
 
 /** 定时行：时间弹层右缘贴本行右缘（行右缘即「选择时间」框右缘） */
 const scheduleTimePopperOptions = {
-  strategy: 'fixed',
+  strategy: 'fixed' as const,
   modifiers: [
     { name: 'offset', options: { offset: [0, 8] } },
     { name: 'preventOverflow', options: { padding: 12, rootBoundary: 'viewport' } },
@@ -198,7 +201,7 @@ const scheduleTimePopperOptions = {
 }
 
 /** EP 默认只回落到不带对齐变体的 top/bottom，弹层会改成按输入框居中摆放、压到面板右缘的滚动条上 */
-const scheduleTimeFallbackPlacements = ['bottom-end', 'top-end']
+const scheduleTimeFallbackPlacements: ('bottom-end' | 'top-end')[] = ['bottom-end', 'top-end']
 
 /** 已上线的文章：本区块只陈述状态，不再提供「立即/定时」二选一 */
 const isLive = computed(() => !!form.id && articleStore.dbStatus === 'published')

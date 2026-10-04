@@ -1,10 +1,10 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import ElementPlus from 'element-plus'
+import { ElLoading } from 'element-plus'
+// 全量样式表而不是按需注入：组件 CSS 若跟着路由 chunk 走，会排到下面这些全局样式之后，
+// 而 src/assets/styles 里有 24 处未 scoped 的 .el-* 覆盖，等特异性下顺序一变就翻盘（见 vite.config.ts）
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
-import locale from 'element-plus/es/locale/lang/zh-cn'
-import 'md-editor-v3/lib/style.css'
 import 'nprogress/nprogress.css'
 import '@fontsource/noto-sans-sc/400.css'
 import '@fontsource/noto-sans-sc/500.css'
@@ -26,6 +26,9 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus, { locale })
+// 组件本身由 unplugin-vue-components 按模板里的实际用量注册（vite.config.ts），
+// 语言包改由 App.vue 的 el-config-provider 提供，所以这里不再 app.use(ElementPlus)。
+// v-loading 是指令不是组件，解析器不管它，而全仓有 28 处在用（含首页与个人页），必须显式装一次
+app.use(ElLoading)
 
 app.mount('#app')
