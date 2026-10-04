@@ -21,6 +21,7 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+.vite/
 
 # Local env & secrets（配置本体只放本地，禁止提交；仅 *.example 模板与 application-prod.yml 入库）
 .env

@@ -1,0 +1,14 @@
+# 构建上下文里不要出现这些：
+# - target/ 是本机 mvn 产物，进上下文会让镜像内容取决于本机上次编译的结果
+# - application.yml 是未入库的真实配置，含数据库/SMTP/JWT/MinIO 凭据，绝不能进镜像层
+target/
+src/main/resources/application.yml
+logs/
+
+# 版本控制与编辑器残留
+.git/
+.gitignore
+*.iml
+.idea/
+.vscode/
+.DS_Store

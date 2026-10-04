@@ -1,0 +1,66 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE（本文件是唯一忽略入口，故不锚定根目录，覆盖各子项目层级）
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+.eslintcache
+
+# Logs
+*.log
+logs/
+
+# Java / Maven
+target/
+
+# Node / Vite
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# Local env & secrets（配置本体只放本地，禁止提交；仅 *.example 模板与 application-prod.yml 入库）
+.env
+.env.*
+!.env.example
+cloudlog_api/src/main/resources/application*.yml
+!cloudlog_api/src/main/resources/application.example.yml
+!cloudlog_api/src/main/resources/application-prod.yml
+
+# 项目本地工作流目录（docs/ 下的正式文档照常入库）
+.hallmark/
+.zcode/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

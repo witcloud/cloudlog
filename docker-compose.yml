@@ -1,0 +1,149 @@
+# ============================================================
+# CloudLog 单实例自托管编排（business-model.md §3.3「自托管部署」）
+#
+# 用法与前置条件见 README「容器化部署」一节：cp .env.example .env 填好凭据，再 docker compose up -d --build。
+# 这里不写任何真实凭据，凭据只来自仓库根的 .env；单实例假设不变（§5.7 第 5 条），
+# 因此没有 K8s、没有镜像仓库推送、没有多副本与滚动更新。
+# ============================================================
+name: cloudlog
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloudlog}
+      # 后端用这个专用账号连库；建库授权由镜像入口脚本完成（只授予 MYSQL_DATABASE 一个库）
+      MYSQL_USER: ${MYSQL_USERNAME:-cloudlog}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 只在数据目录为空的首次启动执行；schema.sql 是库结构唯一真源（docs/db-design.md §1.1.1），
+      # 它只含建表 DDL、不含 CREATE DATABASE，建库由上面的 MYSQL_DATABASE 负责
+      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      # $$ 是给 compose 转义用的：真正的取值由容器内的 shell 展开，避免密码出现在编排文件里
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    # 3306 不对外发布：只有后端连它，运维用 docker compose exec mysql mysql ... 进去
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 只放验证码、频控、阅读去重与 token 失效水位这类短时键（business-model.md §5.6），
+    # 关掉 RDB/AOF 与 README「空实例即可」一致。代价写在 README 的容器化一节
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --requirepass
+      - ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  api:
+    build:
+      context: ./cloudlog_api
+    restart: unless-stopped
+    # 等两个依赖真的就绪再起跑：Spring Boot 起来就抢 Hikari 连接与启动期的摘要回填
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 容器内主机名即服务名，凭据与站点级取值全部来自 .env
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloudlog}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-cloudlog}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-cloudlog}
+      # 后端在 compose 网络里不对外发布，nginx 是唯一入口且以覆盖方式写 X-Forwarded-For，
+      # 所以这里可以采信它（口径见 cloudlog_web/nginx.conf 与 application.example.yml 的说明）。
+      # 一旦把 8080 直接发布出去，或让客户端能绕过 nginx 直连，就必须改回 false
+      APP_TRUST_FORWARDED_FOR: ${APP_TRUST_FORWARDED_FOR:-true}
+    volumes:
+      # 挂载的是「同名叠加」：本文件补结构键，jar 内的 application-prod.yml 继续负责收紧
+      - ./deploy/api/application-prod.yml:/app/config/application-prod.yml:ro
+      - api-logs:/app/logs
+    # 8080 只在网络内可达；调试要直连就临时加 ports: ["127.0.0.1:8080:8080"]，
+    # 同时把 APP_TRUST_FORWARDED_FOR 改回 false
+    expose:
+      - "8080"
+
+  web:
+    build:
+      context: ./cloudlog_web
+      args:
+        # 只用于给历史相对路径兜底（src/config/index.ts），新数据里的图片地址由后端拼成绝对值
+        VITE_APP_MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+        VITE_APP_MINIO_BUCKET: ${MINIO_BUCKET:-cloudlog}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # 站点唯一对外入口。上线时把 80 交给宿主上的 TLS 终结（caddy/nginx）或由本机反代转发
+      - "${WEB_PORT:-80}:80"
+
+  minio:
+    # 图片上传才需要它（README 的功能概览：MinIO 可选），所以默认不跟随 up 起跑：
+    #   docker compose --profile images up -d
+    # 用之前必须先备好镜像——2026-09 起 MinIO 停发免费 Docker 镜像，实测 Docker Hub 的
+    # minio/minio、minio/mc 都已 404，quay.io/minio/minio 匿名拉取被拒（401）。
+    # MINIO_IMAGE 填你自己构建的镜像或可信镜像源里的同名镜像，默认值只是历史名字，拉不到
+    profiles:
+      - images
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    restart: unless-stopped
+    command:
+      - server
+      - /data
+      - --address
+      - ":9000"
+      - --console-address
+      - ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    ports:
+      # 浏览器要能直接打到它——落库的图片地址就是 {MINIO_ENDPOINT}/{bucket}/{key} 的绝对值
+      - "${MINIO_PORT:-9000}:9000"
+      # 控制台：桶的匿名只读策略要在这里手工设（见 README 容器化一节）
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      # 自建镜像里若没有 curl，这一项会一直 unhealthy 而服务本身正常，可整块删掉
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  mysql-data:
+  api-logs:
+  minio-data:

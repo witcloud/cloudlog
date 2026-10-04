@@ -7,8 +7,14 @@
 ```text
 cloudlog/
 ├── cloudlog_web/ # 前端项目（Vue 3 + TypeScript + Vite）
+│   ├── Dockerfile      # node 构建 → nginx 托管 dist
+│   └── nginx.conf      # 三条 SEO 精确映射 + SPA 回退 + /api/v1 反代
 ├── cloudlog_api/ # 后端项目（Spring Boot 3.5 + MyBatis）
+│   └── Dockerfile      # maven 构建 → JRE 21 运行
+├── deploy/ # 容器化部署：挂载进 api 的结构配置 + 最小闭环验证脚本
 ├── docs/ # 项目规范（业务模型 / 数据库设计 / UI 设计）与 schema.sql（建表真源）
+├── docker-compose.yml # 单实例编排：MySQL + Redis + 后端 + 前端（MinIO 见 --profile images）
+├── .env.example # 容器部署的凭据模板（复制为 .env，.env 不入库）
 ├── README.md
 └── .gitignore
 ```
@@ -105,6 +111,46 @@ location / {
 
 填好后到后台「系统设置 → 站点信息 → 站点域名」写一次对外地址（如 `https://你的域名`，末尾不必带斜杠）：sitemap 的 `<loc>`、RSS 的 `link`、robots 的 `Sitemap:` 行都由它拼。留空时按当次请求的 Host 兜底，本机自测够用，正式上线不该依赖它——那个值会随请求头变。
 
+容器化部署时这三条已经在 `cloudlog_web/nginx.conf` 里落地，与上面的片段有两处必要差别：后端不是 `127.0.0.1:8080` 而是 compose 网络里的服务名 `api`；转发头用 `Host $http_host` 而不是 `$host`，后者会把端口丢掉，`WEB_PORT` 不是 80 时兜底出来的地址就打不开。
+
+## 容器化部署（自托管一键起）
+
+对应 `docs/business-model.md` §3.3「自托管部署」。假设一台装了 Docker（含 compose 子命令）的机器、单实例（§5.7 第 5 条），没有 K8s、没有镜像仓库推送、没有多副本。
+
+### 步骤
+
+```bash
+cp .env.example .env    # 逐项填写：凭据只在这里，仓库里只留模板
+docker compose up -d --build
+```
+
+MySQL 容器首次起跑会把 `docs/schema.sql` 导进新建的空库（只在数据目录为空时执行，真源不变）；`api` 等 MySQL 与 Redis 变 healthy 才起跑，`web` 等 `api` 变 healthy 才起跑。站点入口只有 `web` 的 `${WEB_PORT:-80}` 一个端口，后端 8080 不对外发布。
+
+注册账号并提升为首任博主的口径与上面第 4 步一样（界面上没有改角色的入口），只是命令换成走容器：
+
+```bash
+docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" \
+  -e "UPDATE users SET role = 'admin' WHERE email = '你的注册邮箱'"
+```
+
+没配真实 SMTP 时按第 4 步那样从 Redis 读验证码：`docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning GET "auth:code:你的邮箱"`。后端是无条件装配 `JavaMailSender` 的，所以 `SMTP_*` 留空会让容器起不来；填占位值则发码接口报错、但验证码已先写进 Redis，注册照样能完成。
+
+验收走 `./deploy/verify-deploy.sh`：注册 → 发文 → 详情可读 → 三份 SEO 产物在域名根可达 → 自行清理容器与数据卷（`--keep` 保留现场）。
+
+### 配置怎么进容器
+
+- 镜像里既没有凭据也没有 `application.yml`（它不入库，也被 `cloudlog_api/.dockerignore` 挡在构建上下文之外）。
+- `deploy/api/application-prod.yml` 挂到 `/app/config/application-prod.yml`，与 jar 内同名文件**叠加**：本文件补齐「没有 `application.yml` 时会缺」的结构键，jar 内那份的三项收紧（SpringDoc 关闭、actuator 只留 `health`、日志压到 info 并落文件）照旧生效。
+- 为什么不干脆全部写成环境变量：`pagehelper.params=count=countSql` 这类标量值经环境变量传入会被当成字符串、绑不进 Map，启动即 `BindException`（以 Spring Boot 3.5.14 的 Binder 实测）。
+- **改 `application.example.yml` 的结构键要同步 `deploy/api/application-prod.yml`**，数据源 URL 上那组时区参数尤其要紧（口径与回归见 `DataSourceTimeZoneTest`）。
+
+### 四条差别与代价
+
+1. **来源地址**：`APP_TRUST_FORWARDED_FOR` 在容器档里默认 `true`，前提是 api 的 8080 不对外发布、且 nginx 以覆盖方式写 `X-Forwarded-For`（两处配置都是这么写的）。一旦你把 8080 发布出去或改成追加式代理，必须改回 `false`，否则登录爆破计数与发码日额度就成了「换一个头换一个额度」。
+2. **时区**：镜像的 `JAVA_OPTS` 里钉了 `-Duser.timezone=Asia/Shanghai`。库里存的是北京墙钟，而评论频控、日志保留、SEO 产物这三处仍按 JVM 默认时区取「现在」（`business-model.md` §6 未决项），容器默认起在 UTC 就是静默偏 8 小时。
+3. **Redis 不留盘**：编排里关掉 RDB/AOF，与「只放短时键、空实例即可」一致。但口令重置与登出推的 token 失效水位也在 Redis（§5.5），**重建 Redis 容器会让那批本该作废的旧 token 复活**；要在重启后仍保水位，就改 `command` 开 AOF 并给它加卷。
+4. **MinIO 不在默认起跑清单里**：2026-09 起 MinIO 停发免费 Docker 镜像（实测 Docker Hub 的 `minio/minio`、`minio/mc` 已 404，`quay.io/minio/minio` 匿名拉取 401），所以它排在 `--profile images` 后面，且镜像名由 `.env` 的 `MINIO_IMAGE` 提供——自备一个（自己构建，或可信镜像源里的同名镜像）再 `docker compose --profile images up -d`。图片链路另有两件仍是手工事：① 桶要设成匿名只读（后端只建桶、不设策略，控制台 9001 里点，或 `mc anonymous set download`）；② `MINIO_ENDPOINT` 会被拼进落库的图片绝对地址，**换值要回刷库**（`docs/db-design.md` §5.5），本机自测想让浏览器和后端都够得着它，得给一个两边都能解析的名字，正式上线填真实公网域名就天然一致。
+
 ## 配置与敏感信息约定
 
 配置文件本体（含真实密码/密钥）不提交，Git 中只保留 `*.example` 模板和不含任何凭据的 `application-prod.yml`：
@@ -118,6 +164,12 @@ cloudlog_api/src/main/resources/
 ├── application.example.yml     # 提交（模板，密码/密钥均为占位符）
 ├── application.yml             # 不提交（真实配置，含密码/密钥）
 └── application-prod.yml        # 提交（生产收紧覆盖，无凭据）
+
+仓库根/
+├── .env.example                # 提交（容器部署的凭据模板）
+├── .env                        # 不提交（docker compose 读取的真实凭据）
+└── deploy/api/
+    └── application-prod.yml    # 提交（容器档的结构键 + ${ENV} 占位，无凭据）
 ```
 
 三者分工：
@@ -133,6 +185,8 @@ java -jar target/*.jar --spring.profiles.active=prod
 ```
 
 未指定 profile 时走默认配置，接口文档与 actuator 端点保持开放，收紧只在 `prod` 下生效。
+
+容器化部署走的是同一条 `prod` 口径，只是凭据来源换成仓库根的 `.env`、`application.yml` 不进镜像，改由 `deploy/api/application-prod.yml` 挂载补齐结构键——细节与「为什么不是全部用环境变量」写在上面的容器化部署一节。
 
 ## 数据备份（必做）
 

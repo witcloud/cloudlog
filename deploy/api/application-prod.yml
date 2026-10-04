@@ -1,0 +1,96 @@
+# ============================================================
+# 容器部署用的结构配置。docker-compose 把本文件挂到 api 容器的 /app/config/application-prod.yml，
+# 与 jar 内同名的 application-prod.yml 叠加：同名键本文件赢，jar 内独有的键（springdoc 关闭、
+# actuator 只留 health、日志收紧与落文件）照旧生效——实测口径见 README「容器化部署」一节。
+#
+# 为什么需要它：application.yml 不入库，镜像里也不带它（.dockerignore 挡在构建上下文外），
+# 所以「没有 application.yml 时会缺」的结构键必须由这一份补上。
+# 为什么不是全用环境变量：pagehelper.params=count=countSql 这类值经环境变量传会被当成标量字符串
+# 绑不进 Map，启动即 BindException（本机用 Spring Boot 3.5.14 的 Binder 实测）。
+#
+# 键位与 cloudlog_api/src/main/resources/application.example.yml 对齐，**改那边要同步这边**，
+# 数据源 URL 的时区参数口径与其回归说明见那个文件的注释（DataSourceTimeZoneTest）。
+# 凭据一律写成 ${ENV} 占位：真值只在仓库根的 .env 里（business-model.md §5.5「敏感信息」）。
+# ============================================================
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    # 接口前缀是对外契约（business-model.md §5.4），nginx 的三条 SEO 精确映射按它拼路径
+    context-path: /api/v1
+
+spring:
+  application:
+    name: CloudLog
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf-8&useSSL=false&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      database: 0
+  mail:
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          # 三项超时上限（毫秒）。SMTP 解析得出但端口不响应时，不封顶就会一直挂到请求超时
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.ayun.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+pagehelper:
+  helperDialect: mysql
+  reasonable: true
+  supportMethodsArguments: true
+  params: count=countSql
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 604800 # 7 days in seconds
+  header: Authorization
+  prefix: "Bearer "
+
+# MinIO Configuration
+minio:
+  # 这一项会被拼进落库的图片绝对地址（endpoint/bucket/objectKey），换值要回刷库，口径见 db-design.md §5.5
+  endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+  accessKey: ${MINIO_ACCESS_KEY}
+  secretKey: ${MINIO_SECRET_KEY}
+  bucketName: ${MINIO_BUCKET:cloudlog}
+
+app:
+  security:
+    # 容器拓扑里 nginx 是唯一入口（api 的 8080 不对外发布），且 nginx 以覆盖方式写 X-Forwarded-For，
+    # 所以这里默认采信；一旦你把 8080 直接发布出去或改成别的代理写法，请置回 false
+    trust-forwarded-for: ${APP_TRUST_FORWARDED_FOR:true}
+  backfill:
+    # 存量摘要回填：幂等靠扫描谓词本身，跑过即空转，与默认配置同口径
+    excerpt: true
