@@ -177,7 +177,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, onUnmounted } from 'vue'
+import { reactive, ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance } from 'element-plus'
 import {
@@ -369,6 +369,16 @@ const passwordFormReady = computed(
     !!passwordForm.confirmPassword.trim(),
 )
 
+/** 新密码一改，确认位那条不一致就得重算：它原先只在自身 blur 时触发，
+ *  于是改完上方口令，旧的红字还挂着（或者旧的通过状态一直留到提交） */
+watch(
+  () => passwordForm.newPassword,
+  () => {
+    if (!passwordForm.confirmPassword) return
+    passwordFormRef.value?.validateField('confirmPassword').catch(() => {})
+  },
+)
+
 const openPasswordDialog = () => {
   passwordDialogVisible.value = true
 }
@@ -512,6 +522,9 @@ onUnmounted(stopCountdown)
 /* ---- 次级入口：发丝线描边（§6.2） ---- */
 .settings__action {
   flex-shrink: 0;
+  /* 与 auth.css 提交按钮同一档命中高度（44px）：这一页窄屏下整行纵向堆叠，
+     这颗就是唯一落点，24px 出头的按钮在手机上等于靠运气点 */
+  min-height: 2.75rem;
   padding: var(--space-2xs) var(--space-md);
   font-size: var(--text-sm);
   color: var(--color-ink-2);

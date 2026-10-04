@@ -38,7 +38,11 @@
         <template v-if="!isLogin">
           <el-form-item label="验证码" prop="code">
             <div class="auth-code-input">
-              <el-input v-model="authForm.code" placeholder="请输入 6 位验证码" />
+              <el-input
+                v-model="authForm.code"
+                maxlength="6"
+                placeholder="请输入 6 位验证码（5 分钟内有效）"
+              />
               <el-button
                 type="primary"
                 plain
@@ -72,51 +76,72 @@
       </el-form>
 
       <footer class="auth-foot">
-        <span>{{ isLogin ? '还没有账号？' : '已有账号？' }}</span>
-        <button class="auth-foot__switch" @click="toggleMode">
-          {{ isLogin ? '立即注册' : '立即登录' }}
-        </button>
+        <!-- 关闭注册时这句换成说明：留着入口只会让人填完邮箱、收完验证码，才在最后一秒被告知此路不通 -->
+        <template v-if="isLogin">
+          <span>还没有账号？</span>
+          <button v-if="registrationOpen" class="auth-foot__switch" @click="toggleMode">
+            立即注册
+          </button>
+          <span v-else class="auth-foot__closed">本站暂未开放注册</span>
+        </template>
+        <template v-else>
+          <p v-if="!registrationOpen" class="auth-foot__closed">本站暂未开放注册，已有账号请登录。</p>
+          <span>已有账号？</span>
+          <button class="auth-foot__switch" @click="toggleMode">立即登录</button>
+        </template>
       </footer>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { sendCode, register, login as loginApi } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
+import { useSiteStore } from '@/stores/site'
+import { useResendCooldown } from '@/composables/useResendCooldown'
 import SiteLogo from '@/components/SiteLogo.vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const siteStore = useSiteStore()
 const loading = ref(false)
 const sendCodeLoading = ref(false)
-const countdown = ref(0)
 const authFormRef = ref<FormInstance>()
-
-// 倒计时定时器挂组件外层引用：切路由时组件卸载，interval 得跟着停，不能空转到 0
-let countdownTimer: ReturnType<typeof setInterval> | null = null
-onUnmounted(() => {
-  if (countdownTimer) clearInterval(countdownTimer)
-})
 
 const isLogin = computed(() => route.name === 'Login')
 
+/** 后台关掉注册时这一句决定脚注写「立即注册」还是「暂未开放注册」；拉不到设置按开放解读 */
+const registrationOpen = computed(() => siteStore.registrationEnabled)
+
 const authForm = reactive({
   username: '',
-  // 上次登录用过的邮箱（退出登录不清它）。登录与注册共用这个组件与这一份初始值，
-  // 所以注册页也会带上它——要换邮箱本来就是一次覆盖输入
-  email: userStore.lastEmail,
+  // 刚从找回密码页过来的，优先用它带来的邮箱；否则用上次登录过的邮箱
+  // （退出登录不清 lastEmail，登录与注册共用这一份初始值，所以注册页也会带上它）
+  email: (typeof route.query.email === 'string' && route.query.email) || userStore.lastEmail,
   password: '',
   confirmPassword: '',
   code: '',
   // 默认勾选 = 沿用此前的行为（凭据一直存 localStorage）；取消勾选才降级为关掉标签页即失效
   remember: true,
 })
+
+/** 重发窗口按邮箱记在 localStorage：刷新与切页不再把 60 秒清零（见 useResendCooldown） */
+const { countdown, arm: armResend } = useResendCooldown(() => authForm.email)
+
+/** 上方口令一改，确认位那条「两次输入不一致」就得重算：它原先只在自身 blur 时触发，
+ *  于是改完新密码，旧的红字还挂着（或者旧的通过状态一直留到提交） */
+watch(
+  () => authForm.password,
+  () => {
+    if (isLogin.value || !authForm.confirmPassword) return
+    authFormRef.value?.validateField('confirmPassword').catch(() => {})
+  },
+)
 
 const validatePass2 = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value === '') {
@@ -157,7 +182,8 @@ const rules = computed(() => ({
   confirmPassword: [{ validator: validatePass2, trigger: 'blur' }],
   code: [
     { required: true, message: '请输入验证码', trigger: 'blur' },
-    { len: 6, message: '验证码长度为 6 位', trigger: 'blur' },
+    // 六位数字：填进字母只会得到后端那句「验证码错误或已过期」，还白吃一次错误额度
+    { pattern: /^\d{6}$/, message: '验证码是 6 位数字', trigger: 'blur' },
   ],
 }))
 
@@ -176,15 +202,7 @@ const handleSendCode = async () => {
     sendCodeLoading.value = true
     await sendCode(authForm.email)
     ElMessage.success('验证码已发送，请注意查收')
-    countdown.value = 60
-    if (countdownTimer) clearInterval(countdownTimer)
-    countdownTimer = setInterval(() => {
-      countdown.value--
-      if (countdown.value <= 0 && countdownTimer) {
-        clearInterval(countdownTimer)
-        countdownTimer = null
-      }
-    }, 1000)
+    armResend()
   } catch {
     // Error handled by interceptor
   } finally {
@@ -229,7 +247,12 @@ const handleSubmit = async () => {
             code: authForm.code,
           })
           ElMessage.success('注册成功，请登录')
-          router.push('/login')
+          // 把 redirect 带过去：注册是被守卫打断的中间步骤，登完该回到原本要去的那一页，
+          // 而不是把人扔回首页重新点一遍
+          router.push({
+            path: '/login',
+            query: route.query.redirect ? { redirect: route.query.redirect } : {},
+          })
           return
         }
         goAfterLogin()

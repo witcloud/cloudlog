@@ -19,18 +19,24 @@
             {{ statusLabel }}
           </span>
           <span v-if="statusLabel" class="article-status__sep" aria-hidden="true">·</span>
-          <span class="save-status" :class="{ 'is-dirty': saveState === 'dirty' }">
+          <span
+            class="save-status"
+            :class="{ 'is-dirty': saveState === 'dirty' || saveState === 'offline' }"
+          >
             {{ saveStateText }}
           </span>
         </span>
       </div>
 
       <div class="editor-topbar__right">
+        <!-- 预览开关：aria-pressed + 点亮态（对齐 vditor-menu--current）；再点一次或 Esc 退出 -->
         <button
           class="icon-btn"
           aria-label="预览"
+          :aria-pressed="previewing"
+          :class="{ 'is-on': previewing }"
           :disabled="!article.title && !article.content"
-          @click="previewing = true"
+          @click="previewing = !previewing"
         >
           <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
             <path
@@ -42,18 +48,53 @@
             <circle cx="8" cy="8" r="1.8" stroke="currentColor" stroke-width="1.5" />
           </svg>
         </button>
-        <button class="icon-btn settings-toggle" aria-label="文章设置" @click="settingsOpen = true">
+        <!-- 大纲开关：控制右栏显隐（画布列宽随之切换）；<60rem 无右栏，随之隐藏 -->
+        <button
+          class="icon-btn outline-toggle"
+          aria-label="大纲"
+          :aria-pressed="outlineOn"
+          :class="{ 'is-on': outlineOn }"
+          @click="toggleOutline"
+        >
           <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
-            <path
-              d="M2 4.5h7.3M12.7 4.5H14M2 11.5h1.3M6.7 11.5H14"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-            <circle cx="10.5" cy="4.5" r="1.7" stroke="currentColor" stroke-width="1.4" />
-            <circle cx="4.5" cy="11.5" r="1.7" stroke="currentColor" stroke-width="1.4" />
+            <path d="M5.6 4.3h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            <path d="M7.6 8h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            <path d="M9.6 11.7h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            <path d="M2.6 4.3h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M4.6 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M6.6 11.7h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
         </button>
+        <!-- 打字机模式（Typora 同款）：光标所在行恒在可视区中部。vditor 选项只在初始化读一次，
+             切换即以当前内容重建编辑器；偏好跨会话记忆，与大纲开关同一套路。
+             手机上顶栏放不下（返回+状态+预览+发布已满），做桌面专属入口 -->
+        <button
+          class="icon-btn editor-mode-btn"
+          aria-label="打字机模式"
+          :aria-pressed="writingPrefs.typewriterMode"
+          :class="{ 'is-on': writingPrefs.typewriterMode }"
+          @click="toggleTypewriter"
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
+            <rect
+              x="2.2"
+              y="6.2"
+              width="11.6"
+              height="6.6"
+              rx="1.4"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+            <path
+              d="M5 6.2V4.4A1.4 1.4 0 0 1 6.4 3h3.2A1.4 1.4 0 0 1 11 4.4v1.8"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+            <path d="M5.6 9.5h4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+        <!-- 主按钮是文章设置（分类/标签/封面/下线）的唯一入口：草稿与已发布开同一个抽屉，
+             抽屉只在未发布时露出发布方式区，标题与确认文案随状态变 -->
         <button
           class="publish-btn"
           :disabled="!canPublish || submitting || uploadingCount > 0"
@@ -64,42 +105,89 @@
       </div>
     </header>
 
-    <div class="editor-body">
+    <div class="editor-body" :class="{ 'is-with-outline': showPanel && outlineOn }">
       <div class="editor-canvas">
-        <div class="editor-sheet">
-          <input
-            v-model="article.title"
-            class="editor-title"
-            type="text"
-            placeholder="文章标题…"
-            maxlength="100"
-            autocomplete="off"
-          />
+        <!-- 双面用 v-show 常驻切换，严禁 v-if：销毁编辑面会丢掉 vditor 的内容与光标状态 -->
+        <div v-show="!previewing" class="editor-sheet">
+          <div class="editor-title-wrap">
+            <input
+              v-model="article.title"
+              class="editor-title"
+              type="text"
+              placeholder="文章标题…"
+              maxlength="100"
+              autocomplete="off"
+            />
+            <!-- 限长 100 但没有可视反馈，逼近上限才出现，平时不打扰 -->
+            <span
+              v-if="(article.title || '').length >= 70"
+              class="editor-title__count tnum"
+              aria-live="off"
+            >
+              {{ (article.title || '').length }}/100
+            </span>
+          </div>
           <div ref="vditorEl" class="editor-vditor"></div>
+        </div>
+
+        <!-- 预览面：与编辑面同规格的卡片，顶栏/右栏全程可见。md-preview 常驻挂载，
+             编辑时在隐藏态静默跟随渲染，进预览即是渲染好的阅读态 -->
+        <div v-show="previewing" class="preview-sheet">
+          <h1 class="preview-sheet__title">{{ article.title || '无标题' }}</h1>
+          <div ref="previewBodyRef" class="preview-sheet__body">
+            <md-preview
+              :model-value="article.content"
+              :theme="isDark ? 'dark' : 'light'"
+              :show-code-row-number="false"
+              code-theme="one-dark"
+              :sanitize="sanitizeHtml"
+              :on-html-changed="onPreviewHtmlChanged"
+            />
+          </div>
         </div>
       </div>
 
-      <!-- 桌面右侧设置栏 -->
-      <aside v-if="showPanel" class="editor-panel">
-        <div class="editor-panel__head">
-          <span>文章设置</span>
-        </div>
-        <EditorSettingsPanel />
+      <!-- 右栏专职大纲：随顶栏开关与断点显隐，画布列宽在 .editor-body 上联动 -->
+      <aside v-if="showPanel && outlineOn" class="editor-panel">
+        <div class="editor-panel__head">大纲</div>
+        <TocSidebar
+          embedded
+          :toc-items="tocItems"
+          :active-index="activeIndex"
+          @navigate="scrollTo"
+        />
       </aside>
     </div>
 
-    <!-- 移动端底部设置抽屉 -->
+    <!-- 底部状态栏：左侧三个计数实时跟随正文，右侧「回到顶部」。
+         参考图里的「同步滚动」不搬——本项目预览是整面切换，没有并排预览窗可同步 -->
+    <footer class="editor-statusbar">
+      <div class="editor-statusbar__counts">
+        <span class="editor-statusbar__item">
+          字符数: <span class="tnum">{{ charCount }}</span>
+        </span>
+        <span class="editor-statusbar__item">
+          行数: <span class="tnum">{{ lineCount }}</span>
+        </span>
+        <span class="editor-statusbar__item">
+          正文字数: <span class="tnum">{{ proseCount }}</span>
+        </span>
+      </div>
+      <button class="editor-statusbar__action" @click="backToTop">回到顶部</button>
+    </footer>
+
+    <!-- 发布/文章设置抽屉：桌面右拉，窄屏底部上拉；内容体复用设置面板 -->
     <el-drawer
-      v-model="settingsOpen"
-      v-if="!showPanel"
-      direction="btt"
-      size="85%"
+      v-model="drawerOpen"
+      :direction="showPanel ? 'rtl' : 'btt'"
+      :size="showPanel ? '24rem' : '85%'"
       :with-header="false"
-      class="settings-drawer"
+      class="publish-drawer"
+      :before-close="beforeDrawerClose"
     >
-      <div class="settings-drawer__head">
-        <span>文章设置</span>
-        <button class="icon-btn" aria-label="关闭设置" @click="settingsOpen = false">
+      <div class="publish-drawer__head">
+        <span class="publish-drawer__title">{{ drawerTitle }}</span>
+        <button class="icon-btn" aria-label="关闭" @click="discardDrawer">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
             <path
               d="m4 4 8 8M12 4l-8 8"
@@ -110,40 +198,21 @@
           </svg>
         </button>
       </div>
-      <EditorSettingsPanel />
+      <div class="publish-drawer__body">
+        <EditorSettingsPanel :force-publish-method="drawerIntent === 'publish'" />
+      </div>
+      <div class="publish-drawer__foot">
+        <button class="drawer-btn" type="button" @click="discardDrawer">取消</button>
+        <button
+          class="drawer-btn is-primary"
+          type="button"
+          :disabled="submitting"
+          @click="confirmDrawer"
+        >
+          {{ drawerConfirmText }}
+        </button>
+      </div>
     </el-drawer>
-
-    <!-- 阅读态预览 -->
-    <Teleport to="body">
-      <Transition name="fade">
-        <div v-if="previewing" class="preview-overlay">
-          <header class="preview-overlay__bar">
-            <span class="preview-overlay__label">预览</span>
-            <button class="icon-btn" aria-label="关闭预览" @click="previewing = false">
-              <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
-                <path
-                  d="m4 4 8 8M12 4l-8 8"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </button>
-          </header>
-          <div class="preview-overlay__canvas">
-            <div class="preview-overlay__sheet">
-              <h1 class="preview-overlay__title">{{ article.title || '无标题' }}</h1>
-              <md-preview
-                :model-value="article.content"
-                :theme="isDark ? 'dark' : 'light'"
-                code-theme="one-dark"
-                :sanitize="sanitizeHtml"
-              />
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
 
     <!-- 图片上传弹窗：Tab 上传/链接 -->
     <ImageUploadDialog v-model="imageDialogOpen" @confirm="insertImageMarkdown" />
@@ -154,11 +223,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 import { MdPreview } from 'md-editor-v3'
+// 预览面的排版基座：原先由详情页懒加载路由注入，直接进编辑器时预览会缺这套样式
+import 'md-editor-v3/lib/preview.css'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
@@ -174,7 +245,10 @@ import {
 import EditorSettingsPanel from './components/EditorSettingsPanel.vue'
 import ImageUploadDialog from './components/ImageUploadDialog.vue'
 import LinkInsertDialog from './components/LinkInsertDialog.vue'
+import TocSidebar from './components/TocSidebar.vue'
+import { useMarkdownToc } from '@/composables/useMarkdownToc'
 import { formatMinioUrl } from '@/config'
+import { UPLOAD_LIMITS, ACCEPTED_IMAGE_TYPES, ACCEPTED_IMAGE_HINT } from '@/config/upload'
 import { resolveTagIds } from '@/utils/articleTags'
 import { beijingNow } from '@/utils/time'
 
@@ -187,10 +261,40 @@ const { isDark } = useTheme()
 const article = articleStore.editArticle
 const submitting = ref(false)
 const previewing = ref(false)
-const settingsOpen = ref(false)
+const drawerOpen = ref(false)
 const uploadingCount = ref(0)
 const imageDialogOpen = ref(false)
 const linkDialogOpen = ref(false)
+
+// ---- 大纲（右栏）：目录实时推导，不入库 ----
+// levelOffset 取 0：编辑态 vditor IR 的 `#` → h1 原级映射（对齐详情页那条「`#` 渲染后下移成 h2」
+// 的注释可反推），源码推导与 DOM 收集两条来源口径一致
+const { tocItems, activeIndex, containerRef, refresh, scrollTo, startFollow, stopFollow } =
+  useMarkdownToc({ source: computed(() => article.content) })
+
+/** 右栏大纲显隐：localStorage 有记录按记录，无记录默认开启（跨文章记忆，对齐飞书） */
+const OUTLINE_PREF_KEY = 'cloudlog:editor:outline'
+
+const readOutlinePref = (): boolean => {
+  try {
+    return localStorage.getItem(OUTLINE_PREF_KEY) !== '0'
+  } catch {
+    // 隐私模式下读不到就退回默认开启，不报错
+    return true
+  }
+}
+
+const outlineOn = ref(readOutlinePref())
+
+const toggleOutline = () => {
+  outlineOn.value = !outlineOn.value
+  try {
+    localStorage.setItem(OUTLINE_PREF_KEY, outlineOn.value ? '1' : '0')
+  } catch {
+    // 存储失败可接受，仅本次会话生效
+  }
+}
+
 // 打开弹窗时捕获的选区文本，确认后作为链接文字
 let pendingLinkText = ''
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null
@@ -253,9 +357,16 @@ const statusHint = computed(() => {
   return undefined
 })
 
+/** 断网时顶栏必须说真话：节拍照跑只会每 30 秒刷一条红字，而字确实一个都没出去 */
+const offline = ref(!navigator.onLine)
+const onNetChange = () => {
+  offline.value = !navigator.onLine
+}
+
 /** 保存状态（顶栏只读展示，逻辑来自 store 的 isDirty/submitting） */
-const saveState = computed<'new' | 'saved' | 'dirty' | 'saving' | 'uploading'>(() => {
+const saveState = computed<'new' | 'saved' | 'dirty' | 'saving' | 'uploading' | 'offline'>(() => {
   if (uploadingCount.value > 0) return 'uploading'
+  if (offline.value && articleStore.isDirty) return 'offline'
   if (submitting.value) return 'saving'
   if (articleStore.isDirty) return 'dirty'
   if (article.id) return 'saved'
@@ -266,6 +377,8 @@ const saveStateText = computed(() => {
   switch (saveState.value) {
     case 'uploading':
       return '上传图片…'
+    case 'offline':
+      return '离线·未保存'
     case 'saving':
       return '保存中…'
     case 'dirty':
@@ -284,10 +397,153 @@ const onWideChange = (event: MediaQueryListEvent) => {
   showPanel.value = event.matches
 }
 
+// 大纲面板可见才挂滚动跟随，隐藏或 <60rem 即卸——不给写作态添常驻开销。
+// immediate 兜首次加载：默认开启时没有状态变化，不补这一拍跟随不会启动
+watch(
+  [outlineOn, showPanel],
+  ([on, panelVisible]) => {
+    if (on && panelVisible) startFollow()
+    else stopFollow()
+  },
+  { immediate: true },
+)
+
+// ---- 预览：画布内双面切换，编辑位置不丢 ----
+const previewBodyRef = ref<HTMLElement>()
+let editScrollY = 0
+
+/** 大纲容器换绑到当前形态的渲染面并重算：两条渲染链都是 `#` → hN 原级映射，levelOffset 不变 */
+const syncTocContainer = () => {
+  containerRef.value = previewing.value ? (previewBodyRef.value ?? null) : (vditorEl.value ?? null)
+  refresh()
+}
+
+watch(
+  previewing,
+  (on) => {
+    // flush post：等 v-show 真正换面再动滚动，否则文档高度还是旧面，落点会被钳掉。
+    // 进预览滚到阅读起点，退出恢复进预览前的编辑位置
+    if (on) {
+      editScrollY = window.scrollY
+      window.scrollTo(0, 0)
+    } else {
+      window.scrollTo(0, editScrollY)
+    }
+    syncTocContainer()
+  },
+  { flush: 'post' },
+)
+
+// md-editor-v3 渲染完成（modelValue 之后的一个宏任务）再收一次大纲，否则收集跑在 DOM 之前。
+// 编辑态隐藏渲染也会触发，但那条路由 source watch 已覆盖，只在预览态需要补收
+const onPreviewHtmlChanged = () => {
+  if (previewing.value) nextTick(refresh)
+}
+
+// ---- 发布抽屉：设置迁入按需抽屉，右栏让位给大纲 ----
+// 数据流用「快照-回滚」实现「确认才生效」：面板直接编辑 store 字段（结构不动），
+// 开抽屉时拍下快照，取消即整体回滚（含封面本地文件）；确认不回滚并触发场景保存链路
+type DrawerIntent = 'publish' | 'settings'
+const drawerIntent = ref<DrawerIntent>('publish')
+
+const snapshotDrawerState = () => ({
+  status: article.status,
+  publishTime: article.publishTime,
+  cover: article.cover,
+  categoryId: article.categoryId,
+  tags: [...article.tags],
+  localCover: articleStore.localCover,
+})
+let drawerSnapshot: ReturnType<typeof snapshotDrawerState> | null = null
+
+/** 头部标题随场景：发布流是「发布设置」，已发布的纯设置是「文章设置」 */
+const drawerTitle = computed(() => (drawerIntent.value === 'publish' ? '发布设置' : '文章设置'))
+
+/** 确认文案矩阵：已发布走「保存更新」；发布流按时场景与方式给文案 */
+const drawerConfirmText = computed(() => {
+  if (drawerIntent.value === 'settings') return '保存更新'
+  if (isOfflineEdit.value) {
+    return article.status === 'scheduled' ? '确认并定时上线' : '确认上线'
+  }
+  if (article.status === 'scheduled') {
+    // 库中已定时的改期；草稿上的定时意图沿用发布文案
+    return articleStore.dbStatus === 'scheduled' ? '确认并定时' : '确认并定时发布'
+  }
+  return '确认并发布'
+})
+
+const openDrawer = (intent: DrawerIntent) => {
+  drawerSnapshot = snapshotDrawerState()
+  drawerIntent.value = intent
+  drawerOpen.value = true
+}
+
+/** 非用户取消的强制收场（换文章等）：丢弃快照直接关，不做回滚——
+    此时 store 已被新文章数据接管，回滚反而会拿旧值覆盖新文章的设置 */
+const abortDrawer = () => {
+  drawerSnapshot = null
+  drawerOpen.value = false
+}
+
+/** el-drawer 的 Esc/遮罩关闭走 before-close：与右上的 × 同样视为「取消」，回滚快照 */
+const beforeDrawerClose = (done: () => void) => {
+  discardDrawer()
+  done()
+}
+
+/** 取消：回滚到开抽屉时的快照。设置编辑不进脏标记 watch，回滚后界面与脏标记都不留痕 */
+const discardDrawer = () => {
+  const snap = drawerSnapshot
+  if (snap) {
+    article.status = snap.status
+    article.publishTime = snap.publishTime
+    article.cover = snap.cover
+    article.categoryId = snap.categoryId
+    article.tags = [...snap.tags]
+    // 本地封面文件一并还原：本次抽屉里新选的图不外泄
+    articleStore.localCover = snap.localCover
+  }
+  drawerSnapshot = null
+  drawerOpen.value = false
+}
+
+/** 确认：发布流先校验（失败 toast 并留在抽屉），通过后按方式归一状态走发布通道；
+    设置意图（已发布的「更新」）走草稿通道——载荷不带 status，成功给一次性提示 */
+const confirmDrawer = async () => {
+  if (drawerIntent.value === 'publish') {
+    if (!article.categoryId) {
+      ElMessage.warning('请在发布设置中选择文章分类')
+      return
+    }
+    if (article.status === 'scheduled') {
+      if (!article.publishTime) {
+        ElMessage.warning('请选择定时发布时间')
+        return
+      }
+      // 计划时刻是北京墙钟口径（后端 Jackson 锚 GMT+8），「当前时间」也须取北京墙钟来比
+      if (dayjs(article.publishTime).isBefore(beijingNow())) {
+        ElMessage.warning('定时发布时间需晚于当前时间')
+        return
+      }
+    }
+    drawerSnapshot = null
+    drawerOpen.value = false
+    // 非定时一律立即：草稿意图（draft）与下线态的「上线」都归一到 published
+    article.status = article.status === 'scheduled' ? 'scheduled' : 'published'
+    await handleRealSave(false)
+    return
+  }
+  drawerSnapshot = null
+  drawerOpen.value = false
+  await handleRealSave(true)
+}
+
 /**
  * 加载文章数据（业务逻辑与原实现一致）
  */
 const loadArticleData = async (id?: string) => {
+  // 换文章先收掉可能开着的抽屉（站点内换 id 走这里，组件不卸载）
+  abortDrawer()
   if (id) {
     try {
       const res = await getArticleDetail(id)
@@ -315,9 +571,12 @@ const loadArticleData = async (id?: string) => {
 watch(
   () => route.params.id,
   (newId) => {
-    if (route.name === 'ArticleEditor') {
-      loadArticleData(newId as string)
-    }
+    if (route.name !== 'ArticleEditor') return
+    // 新建保存成功后要回填 id（handleRealSave 里先 article.id = newId 再 replace），
+    // 这一跳地址变了但读的还是同一条记录。不挡掉就会 GET 一遍再用库中快照 setValue，
+    // 把点在请求期间、还没落库的那几个字连撤销栈一起抹掉，而顶栏此时已写着「已保存」
+    if (newId && String(newId) === String(article.id)) return
+    loadArticleData(newId as string)
   },
 )
 
@@ -339,33 +598,11 @@ const goBack = () => {
   }
 }
 
+/** 主按钮矩阵：已发布走「设置」意图（抽屉藏起发布方式区，确认=保存更新，载荷不带 status），
+    其余走「发布」意图（露出发布方式区，确认前校验分类与定时时刻）。
+    顶栏齿轮已于 2026-10-04 撤下，这里是文章设置的唯一入口 */
 const handlePublish = () => {
-  // 校验规则与原发布弹窗一致
-  if (!article.categoryId) {
-    ElMessage.warning('请在右侧设置中选择文章分类')
-    settingsOpen.value = !showPanel.value
-    return
-  }
-  if (article.status === 'scheduled') {
-    if (!article.publishTime) {
-      ElMessage.warning('请选择定时发布时间')
-      return
-    }
-    // 计划时刻是北京墙钟口径（后端 Jackson 锚 GMT+8），「当前时间」也须取北京墙钟来比，
-    // 浏览器不在东八区时用本地 now 会差出时区差
-    if (dayjs(article.publishTime).isBefore(beijingNow())) {
-      ElMessage.warning('定时发布时间需晚于当前时间')
-      return
-    }
-  }
-  // 已发布文章：状态已在库中，「更新」只走纯内容保存通道，不带 status、不改 article.status
-  if (isPublishedEdit.value) {
-    handleRealSave(true)
-    return
-  }
-  // 已下线文章走到这里即「上线」：与首次发布同一条通道，后端因 published_at 已有值不会覆盖首发时刻
-  article.status = article.status === 'scheduled' ? 'scheduled' : 'published'
-  handleRealSave(false)
+  openDrawer(isPublishedEdit.value ? 'settings' : 'publish')
 }
 
 const handleSaveDraft = () => {
@@ -382,17 +619,40 @@ const requestSaveDraft = () => {
   handleSaveDraft()
 }
 
-// Cmd/Ctrl + S 保存草稿
+// Cmd/Ctrl + S 保存草稿；Esc 退出预览
 const onKeydown = (event: KeyboardEvent) => {
+  if (drawerOpen.value) {
+    // 抽屉是显式事务边界：⌘S 会把未确认的设置连着内容一起落库，Esc 归 el-drawer 自己
+    return
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
     requestSaveDraft()
   }
+  if (event.key === 'Escape' && previewing.value) {
+    event.preventDefault()
+    previewing.value = false
+  }
+}
+
+/**
+ * 关标签页/刷新前的最后一道闸。onBeforeRouteLeave 只管站内跳转，
+ * ⌘W 与刷新不经过路由器，问都问不到；vditor 的本地 cache 是关着的（见 initVditor），
+ * 所以这一屏没别的东西兜着，不拦就是整篇没了。
+ */
+const onWindowUnload = (event: BeforeUnloadEvent) => {
+  if (!articleStore.isDirty) return
+  event.preventDefault()
+  // Chrome 要求显式赋值才弹确认，光 preventDefault 不够
+  event.returnValue = ''
 }
 
 onMounted(() => {
   wideQuery.addEventListener('change', onWideChange)
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('beforeunload', onWindowUnload)
+  window.addEventListener('online', onNetChange)
+  window.addEventListener('offline', onNetChange)
   initVditor()
   loadArticleData(route.params.id as string)
   startAutoSave()
@@ -401,6 +661,9 @@ onMounted(() => {
 onUnmounted(() => {
   wideQuery.removeEventListener('change', onWideChange)
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('beforeunload', onWindowUnload)
+  window.removeEventListener('online', onNetChange)
+  window.removeEventListener('offline', onNetChange)
   stopAutoSave()
   hintPanelObserver?.disconnect()
   hintPanelObserver = null
@@ -422,6 +685,19 @@ onBeforeRouteLeave((to, from, next) => {
     next()
   }
 })
+
+/** ---- 底部状态栏 ----
+ * 字符数/行数按 Markdown 源码算（字符数与 vditor 的 type: 'markdown' 同口径：去掉末尾那记换行）；
+ * 正文字数不自己剥标记，直接借 vditor 的 type: 'text' 计数（它取 IR 面 textContent 长度），
+ * 由 counter.after 回灌，见 initVditor。 */
+const proseCount = ref(0)
+const charCount = computed(() =>
+  article.content.endsWith('\n') ? article.content.length - 1 : article.content.length,
+)
+const lineCount = computed(() => (article.content ? article.content.split('\n').length : 0))
+
+/** 与目录跳转同一套平滑滚动（useMarkdownToc.scrollTo） */
+const backToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' })
 
 /**
  * Vditor IR（所见即所得）初始化
@@ -481,24 +757,72 @@ const saveTip = computed(() =>
 const syncSaveButton = () => {
   const item = vditorEl.value?.querySelector('.cl-tb-save')
   if (!item) return
-  const pending = ['dirty', 'saving', 'uploading'].includes(saveState.value)
+  const pending = ['dirty', 'offline', 'saving', 'uploading'].includes(saveState.value)
   item.classList.toggle('is-dirty', pending)
   item.querySelector('button')?.setAttribute('aria-label', saveTip.value)
 }
 
 watch([saveState, saveTip], syncSaveButton)
 
-const initVditor = () => {
+// ---- 打字机模式（Typora 同款）：vditor 的该选项只在构造时读一次，切换即重建编辑器 ----
+const TYPEWRITER_KEY = 'cloudlog:editor:typewriter'
+
+const readTypewriterPref = (): boolean => {
+  try {
+    return localStorage.getItem(TYPEWRITER_KEY) === '1'
+  } catch {
+    // 隐私模式下读不到就退回默认关闭，不报错
+    return false
+  }
+}
+
+const writingPrefs = ref({ typewriterMode: readTypewriterPref() })
+
+/** 重建是唯一干净的切换路径：内容取实例当前值（含未落库的输入），
+ *  焦点与撤销历史会丢——模式切换是低频操作，可接受 */
+const rebuildVditor = () => {
+  const value = vditor?.getValue() ?? article.content ?? ''
+  hintPanelObserver?.disconnect()
+  hintPanelObserver = null
+  vditor?.destroy()
+  vditor = null
+  vditorReady = false
+  initVditor(value)
+}
+
+const toggleTypewriter = () => {
+  writingPrefs.value.typewriterMode = !writingPrefs.value.typewriterMode
+  try {
+    localStorage.setItem(TYPEWRITER_KEY, writingPrefs.value.typewriterMode ? '1' : '0')
+  } catch {
+    // 存储失败可接受，仅本次会话生效
+  }
+  rebuildVditor()
+}
+
+const initVditor = (initialValue?: string) => {
   if (!vditorEl.value) return
   vditor = new Vditor(vditorEl.value, {
     cdn: '/vditor',
     lang: 'zh_CN',
     mode: 'ir',
-    value: article.content,
+    value: initialValue ?? article.content ?? '',
     placeholder: '开始你的创作…',
     theme: isDark.value ? 'dark' : 'classic',
     height: 'auto',
     cache: { enable: false },
+    /* 打字机模式（Typora 同款）：由顶栏开关控制，重建生效 */
+    typewriterMode: writingPrefs.value.typewriterMode,
+    /* 只借库的「正文字数」取数（IR 面 textContent 长度，每次渲染回灌一次）。
+       库把它渲染成工具栏末尾一个裸数字 span，本项目把工具栏改成 flex 后它会换到第二行压在正文上，
+       故用 CSS 隐掉、由底部状态栏接手显示 */
+    counter: {
+      enable: true,
+      type: 'text',
+      after: (length) => {
+        proseCount.value = length
+      },
+    },
     /* 布局：行内格式与标题 │ 块级与插入下拉 │ 历史 │ 插入图片链接 │ 保存。
        prefix/suffix/hotkey 与 vditor 默认一致（仅换图标与文案）；
        下拉父项通过 toolbar 子数组走 vditor 原生 submenu 渲染与开合。
@@ -538,6 +862,7 @@ const initVditor = () => {
         prefix: '~~',
         suffix: '~~',
         hotkey: '⌘D',
+        className: 'cl-tb-opt',
         icon: tbIcons.strike,
         tip: '删除线',
         tipPosition: 'ne',
@@ -588,8 +913,22 @@ const initVditor = () => {
         ],
       },
       '|',
-      { name: 'undo', icon: tbIcons.undo, hotkey: '⌘Z', tip: '撤销', tipPosition: 'n' },
-      { name: 'redo', icon: tbIcons.redo, hotkey: '⌘Y', tip: '重做', tipPosition: 'n' },
+      {
+        name: 'undo',
+        className: 'cl-tb-opt',
+        icon: tbIcons.undo,
+        hotkey: '⌘Z',
+        tip: '撤销',
+        tipPosition: 'n',
+      },
+      {
+        name: 'redo',
+        className: 'cl-tb-opt',
+        icon: tbIcons.redo,
+        hotkey: '⌘Y',
+        tip: '重做',
+        tipPosition: 'n',
+      },
       '|',
       {
         name: 'cl-image',
@@ -665,6 +1004,8 @@ const initVditor = () => {
       if (article.content) {
         vditor?.setValue(article.content)
       }
+      // 容器绑定与首次收集放在 setValue 之后：回显的标题渲染进 DOM 才收集得到
+      syncTocContainer()
     },
   })
 }
@@ -676,6 +1017,8 @@ watch(
     if (!vditor || !vditorReady) return
     if (vditor.getValue() === val) return
     vditor.setValue(val ?? '')
+    // 程序化回显不触发 input 回调，大纲得手动重收一次（用户输入那条路由 source watch 已覆盖）
+    refresh()
   },
 )
 
@@ -696,10 +1039,24 @@ const onUploadImages = async (files: File[]): Promise<null> => {
 }
 
 const uploadImages = async (files: File[]): Promise<string | null> => {
-  uploadingCount.value += files.length
+  // 拖拽与粘贴不经过上传弹窗，那两道前置校验（格式、体积）在这里补一次。
+  // 少了这一道：6–10MB 的图静默落库，>10MB 只能拿到一个后端 400，而弹窗那条路一直拦到 5MB
+  const accepted = files.filter((file) => {
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      ElMessage.error(`图片 ${file.name} 格式不支持，仅接受 ${ACCEPTED_IMAGE_HINT}`)
+      return false
+    }
+    if (file.size > UPLOAD_LIMITS.articleImage) {
+      ElMessage.error(`图片 ${file.name} 超过 5MB 限制，请压缩后重试`)
+      return false
+    }
+    return true
+  })
+  if (accepted.length === 0) return null
+  uploadingCount.value += accepted.length
   try {
     const urls: string[] = []
-    for (const file of files) {
+    for (const file of accepted) {
       try {
         const res = await uploadArticleImage(file)
         if (res.code === 200) {
@@ -715,7 +1072,7 @@ const uploadImages = async (files: File[]): Promise<string | null> => {
     if (urls.length === 0) return null
     return urls.map((url) => `![](${url})`).join('\n')
   } finally {
-    uploadingCount.value = Math.max(0, uploadingCount.value - files.length)
+    uploadingCount.value = Math.max(0, uploadingCount.value - accepted.length)
   }
 }
 
@@ -745,8 +1102,12 @@ const insertLinkMarkdown = (url: string) => {
 const startAutoSave = () => {
   stopAutoSave()
   autoSaveTimer = setInterval(() => {
-    // 提交中/上传中不打断；标题或正文为空时后端会拒，也就没必要落一个空壳草稿
+    // 提交中/上传中不打断；标题或正文为空时后端会拒，也就没必要落一个空壳草稿；
+    // 抽屉开着时更不能存——里面的发布意图（如定时）还没被「确认」，静默保存会把未确认态写进库
     if (!articleStore.isDirty || submitting.value || uploadingCount.value > 0) return
+    // 断网时这一拍必然失败，跑一次就多弹一条红字；停在顶栏的「离线·未保存」上等网络回来
+    if (offline.value) return
+    if (drawerOpen.value) return
     if (!article.title || !article.content) return
     void handleRealSave(true, true)
   }, AUTO_SAVE_MS)
@@ -826,13 +1187,14 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
       if (!isSilent) {
         if (isDraft) {
           if (isPublishedEdit.value) {
-            settingsOpen.value = false
+            drawerOpen.value = false
             ElMessage.success('文章已更新')
           } else {
+            drawerOpen.value = false
             ElMessage.success('草稿已保存')
           }
         } else {
-          settingsOpen.value = false
+          drawerOpen.value = false
           router.replace({ path: '/publish-success', query: { id: savedId } })
         }
       }
@@ -856,6 +1218,8 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   min-height: 100dvh;
   background-color: var(--color-paper);
   color: var(--color-ink);
+  /* 底部状态栏栏高：右栏大纲的可用高度要给它让出来，否则末项被压在栏底下 */
+  --editor-statusbar-h: 2rem;
 }
 
 /* ---- 顶栏 ---- */
@@ -914,6 +1278,82 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   }
 }
 
+/* 顶栏纯图标按钮的悬浮提示：文案直接取 aria-label，不另立第二份词表。
+   与 vditor 工具栏气泡同一套语言（ink 底 + 按钮下方弹出 + 上指箭头，吸顶后向上会被顶栏切掉），
+   暗色下 ink/paper 互换，气泡自动反色。只覆盖顶栏这 5 枚，抽屉里的关闭钮不在内 */
+.editor-topbar .icon-btn {
+  position: relative;
+
+  &::before,
+  &::after {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity var(--dur-micro) var(--ease-out),
+      visibility var(--dur-micro) var(--ease-out);
+  }
+
+  &::after {
+    content: attr(aria-label);
+    position: absolute;
+    z-index: var(--z-tooltip);
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: var(--space-2xs);
+    padding: var(--space-3xs) var(--space-xs);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-ink);
+    color: var(--color-paper);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+
+  /* 箭头填按钮底缘到气泡顶缘那 4px 的缝，两者相接不断开 */
+  &::before {
+    content: '';
+    position: absolute;
+    z-index: var(--z-tooltip);
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-width: 0;
+    border-bottom-color: var(--color-ink);
+  }
+
+  &:hover::before,
+  &:hover::after {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* 点亮态（大纲开关、预览开关）：对齐 vditor-menu--current 的交互语言（accent 色 + accent-wash 底），
+   hover 不得把洗染底冲成灰面，所以一并压过 hover 态 */
+.icon-btn.is-on,
+.icon-btn.is-on:hover:not(:disabled) {
+  color: var(--color-accent);
+  background-color: var(--color-accent-wash);
+}
+
+/* 打字机开关：桌面专属入口，手机顶栏放不下（返回+状态+预览+发布已满） */
+.editor-mode-btn {
+  display: none;
+}
+
+@media (min-width: 40rem) {
+  .editor-mode-btn {
+    display: grid;
+  }
+}
+
+/* 大纲开关只在 ≥60rem（右栏存在）露出，与设置开关的显隐正好相反 */
+.outline-toggle {
+  display: none;
+}
+
 /* 状态徽章 + 保存状态：同为顶栏只读小字，紧密成组 */
 .topbar-status {
   display: inline-flex;
@@ -969,7 +1409,7 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   }
 }
 
-/* ---- 主体：画布 + 设置栏 ---- */
+/* ---- 主体：画布 + 大纲栏 ---- */
 .editor-body {
   flex: 1;
   display: grid;
@@ -988,46 +1428,71 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 .editor-sheet {
   max-width: var(--measure-prose);
   margin: var(--space-md) auto 0;
-  padding: var(--space-xl) var(--space-lg) var(--space-3xl);
+  padding: var(--space-md) var(--space-lg) var(--space-xl);
   background-color: var(--color-paper-2);
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-whisper);
 }
 
-/* 标题与正文同一条左缘：input 的 UA 默认 2px 内衬要去掉，
-   且不能同时写 width:100% 和 margin-inline——那样盒子会溢出画布右缘。 */
+/* 标题照搬掘金那套：输入框自身不带 margin / padding / border，字号退到正文之上的一档。
+   原来靠负外边距把下沿分隔线顶到卡片描边，现在没有这条线，外扩一并撤掉，
+   标题左缘由 .editor-sheet 的那一档内衬给出。 */
 .editor-title {
   display: block;
-  width: 100%;
-  padding-inline: 0;
+  margin: 0;
+  padding: 0;
   border: none;
   outline: none;
   background: transparent;
   font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: 700;
+  font-size: var(--text-lg);
+  font-weight: 500;
   line-height: 1.3;
   color: var(--color-ink);
-  margin-bottom: var(--space-md);
 
   &::placeholder {
     color: var(--color-ink-4);
   }
 }
 
-/* ---- 桌面设置栏 ---- */
+/* 标题字数计数：贴近上限（70+）才出现的右下角小字，坐在分隔线上方 */
+.editor-title-wrap {
+  position: relative;
+}
+
+.editor-title__count {
+  position: absolute;
+  inset-inline-end: var(--space-lg);
+  inset-block-end: var(--space-2xs);
+  padding-inline-start: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--color-ink-4);
+  background-color: var(--color-paper-2);
+  pointer-events: none;
+}
+
+/* 标题不再自带下内衬，与工具栏之间那一档改由这里给 */
+.editor-vditor {
+  margin-top: var(--space-md);
+}
+
+/* ---- 桌面右栏：大纲专用，随顶栏开关显隐 ---- *
+ * 开关打开时 .editor-body 双列（画布 + 17rem 栏），关闭时单列、画布由 max-width 居中。
+ * 纵向 flex：目录列表撑满剩余高度内部滚动，高亮项保持可见的机制照常生效 */
 .editor-panel {
-  display: none;
   position: sticky;
   top: var(--header-h);
-  max-height: calc(100dvh - var(--header-h));
+  max-height: calc(100dvh - var(--header-h) - var(--editor-statusbar-h));
   overflow-y: auto;
   width: 17rem;
   border-inline-start: 1px solid var(--color-rule);
   background-color: var(--color-paper);
+  display: flex;
+  flex-direction: column;
 
   &__head {
+    flex-shrink: 0;
     padding: var(--space-md) var(--space-md) 0;
     font-size: var(--text-xs);
     letter-spacing: 0.08em;
@@ -1035,59 +1500,148 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   }
 }
 
-.settings-drawer__head {
+/* ---- 底部状态栏：Typora 同款 ----
+   sticky bottom 而非 fixed：整页是文档级滚动，fixed 会盖住最后一行正文、还得给页面补 padding-bottom；
+   sticky 平时钉在视口底，滚到文末自然落定。吸顶顶栏用同一档 z */
+.editor-statusbar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md) var(--space-lg) var(--space-sm);
+  gap: var(--space-md);
+  height: var(--editor-statusbar-h);
+  padding-inline: var(--space-md);
+  border-top: 1px solid var(--color-rule);
+  background-color: var(--color-paper);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.editor-statusbar__counts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.editor-statusbar__item .tnum {
+  color: var(--color-ink);
+}
+
+.editor-statusbar__action {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-out);
+
+  &:hover {
+    color: var(--color-ink);
+  }
+}
+
+/* ---- 发布/文章设置抽屉：桌面右拉 24rem，窄屏底部上拉 85% ---- */
+.publish-drawer .el-drawer__body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  /* 滚动交给内容区：底部「取消/确认」恒钉在抽屉下缘 */
+  overflow: hidden;
+}
+
+.publish-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-rule);
   font-size: var(--text-xs);
   letter-spacing: 0.08em;
   color: var(--color-ink-4);
 }
 
-/* ---- 预览覆盖层 ---- */
-.preview-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
+.publish-drawer__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.publish-drawer__foot {
   display: flex;
-  flex-direction: column;
-  background-color: var(--color-paper);
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--color-rule);
+}
 
-  &__bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: var(--header-h);
-    padding-inline: var(--space-md);
-    border-bottom: 1px solid var(--color-rule);
+/* 取消（次要）与确认（主）等宽成对：主按钮沿用发布键的墨面Hover朱砂 */
+.drawer-btn {
+  flex: 1;
+  height: 2rem;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-rule-strong);
+  color: var(--color-ink-2);
+  background-color: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+
+  &:hover {
+    color: var(--color-ink);
+    background-color: var(--color-paper-3);
   }
 
-  &__label {
-    font-size: var(--text-xs);
-    letter-spacing: 0.08em;
-    color: var(--color-ink-4);
-  }
+  &.is-primary {
+    border-color: transparent;
+    color: var(--color-paper-2);
+    background-color: var(--color-ink);
 
-  &__canvas {
-    flex: 1;
-    overflow-y: auto;
-  }
+    &:hover:not(:disabled) {
+      background-color: var(--color-accent);
+    }
 
-  &__sheet {
-    max-width: var(--measure-prose);
-    margin-inline: auto;
-    padding: var(--space-xl) var(--space-lg) var(--space-3xl);
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
   }
+}
+
+/* ---- 预览面：与编辑面同规格的卡片（同底色/描边/阴影/内衬，同收 --measure-prose，
+   两面换行位置一致，「所见即所得」才成立）。正文排版走 global.css 的
+   md-editor-previewOnly 那套 Token 版式，与阅读页同一套值 ---- */
+.preview-sheet {
+  max-width: var(--measure-prose);
+  margin: var(--space-md) auto 0;
+  padding: var(--space-md) var(--space-lg) var(--space-xl);
+  background-color: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-whisper);
 
   &__title {
+    font-family: var(--font-display);
     font-size: var(--text-2xl);
     font-weight: 700;
     line-height: 1.3;
-    margin-bottom: var(--space-lg);
-    padding-bottom: var(--space-lg);
+    color: var(--color-ink);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-md);
     border-bottom: 1px solid var(--color-rule);
   }
+}
+
+/* 预览态的判定线只躲吸顶顶栏（工具栏属于编辑面），与详情页正文同一套值 */
+.preview-sheet .md-editor-preview :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: calc(var(--header-h) + var(--space-lg));
 }
 
 /* ---- Vditor 定制：贴合 Token 与阅读版式 ---- */
@@ -1102,8 +1656,10 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   --panel-background-color: var(--color-paper-2);
   --textarea-background-color: var(--color-paper-3);
   --toolbar-background-color: var(--color-paper);
-  /* 工具栏尺寸与图标色走 vditor 内部变量，值引用 Token */
-  --toolbar-height: 2rem;
+  /* 工具栏尺寸与图标色走 vditor 内部变量，值引用 Token。
+     --toolbar-height 要跟实栏高一致（32 按钮 + 上下各 --space-2xs 内衬 = 2.5rem），
+     它是下面标题 scroll-margin-top 的输入 */
+  --toolbar-height: 2.5rem;
   --toolbar-icon-color: var(--color-ink-3);
   --toolbar-icon-hover-color: var(--color-ink);
   --second-color: var(--color-rule);
@@ -1112,6 +1668,12 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 .editor-page .vditor-content {
   min-height: 55vh;
   background: transparent;
+}
+
+/* 库自己注入的那枚裸数字：只留它回灌数值（counter.after），渲染交给底部状态栏。
+   它在 .vditor-toolbar 的最后一个子节点位上，工具栏是 flex-wrap，装不下就换到第二行压正文 */
+.editor-page .vditor-counter {
+  display: none;
 }
 
 /* ---- 写作面版式：与详情页同一套值 ---- *
@@ -1147,7 +1709,7 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   line-height: 1.35;
   color: var(--color-ink);
   word-break: normal;
-  margin: var(--space-lg) 0 var(--space-sm);
+  margin: var(--space-md) 0 var(--space-sm);
   /* light.css 给 h1/h2 画了一条 GitHub 式下划线，阅读页没有 */
   padding-block-end: 0;
   border-block-end: none;
@@ -1155,6 +1717,15 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 
 .editor-page .vditor .vditor-reset h1 {
   font-size: var(--text-xl);
+  /* 与阅读页 h2 同节奏：`#` 在那边渲染成 h2（章节级），上方抬到 24 扛「换了一章」的信号 */
+  margin-block-start: var(--space-lg);
+}
+
+/* 大纲的判定线与点击落点共用标题的 scroll-margin-top（composable 读首个标题的计算值）：
+   编辑态要躲开吸顶顶栏 + 吸顶工具栏（--toolbar-height 即整条栏高，含上下内衬），
+   再让一档呼吸，跳转落点与高亮判定才始终是同一条线 */
+.editor-page .vditor .vditor-reset :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: calc(var(--header-h) + var(--toolbar-height) + var(--space-sm));
 }
 
 .editor-page .vditor .vditor-reset h2 {
@@ -1175,6 +1746,24 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 
 .editor-page .vditor .vditor-reset h6 {
   color: var(--color-ink-3);
+}
+
+/* IR 展开态摊开的是「整块」的标记：h2 自己就是一枚 .vditor-ir__node，光标一进标题，
+   库的 .vditor-ir__node--expand .vditor-ir__marker 把里面所有标记一起放开，
+   而这些 span 不带字号，全部继承标题那一档。图片/链接的源码因此按 25px/700 排，
+   一枚 70 字的 URL 实测 848px 宽，比 691px 的画布还宽，光标一进标题这行就跳成两行巨字。
+   收回与代码块同一档源文本字号（--text-sm + 等宽）：`##` 是这一行的身份，留在标题档；
+   行内对象的源码不是标题正文，读作源文本。选择器要求 .vditor-ir__node 落在标题之后，
+   标题自己的 `##` 标记是 h2 的直接子级，不被吃进。 */
+.editor-page
+  .vditor
+  .vditor-reset
+  :is(h1, h2, h3, h4, h5, h6)
+  .vditor-ir__node
+  .vditor-ir__marker {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 400;
 }
 
 .editor-page .vditor .vditor-reset p {
@@ -1209,20 +1798,20 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 }
 
 .editor-page .vditor .vditor-reset blockquote {
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   padding: 0 var(--space-md);
   border-inline-start: 2px solid var(--color-rule-strong);
   color: var(--color-ink-3);
   line-height: inherit;
 }
 
-/* vditor 把 hr 留成 inline-block：边距不与相邻段落折叠（12+24=36），
+/* vditor 把 hr 留成 inline-block：边距不与相邻段落折叠（12+16=28），
    而且它坐在 28px 的行盒基线上，下方还挂着一截降部空间（实测 43）。
-   改成 block 之后与阅读页同一套折叠结果：上下各 24。 */
+   改成 block 之后与阅读页同一套折叠结果：上下各 16。 */
 .editor-page .vditor .vditor-reset hr {
   display: block;
   height: 0;
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   border: none;
   border-block-start: 1px solid var(--color-rule);
   /* light.css 把 hr 做成 2px 的 #eaecef 粗条，阅读页是 1px 发丝线 */
@@ -1230,9 +1819,15 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 }
 
 /* 行内代码：库的选择器带两串 :not()，特异性 0,3,1 与本文件打平且注入在后，
-   必须把 :not() 一起抄上才压得过 */
-.editor-page .vditor .vditor-reset code:not(.hljs):not(.highlight-chroma) {
+   必须把 :not() 一起抄上才压得过。
+   :where(:not(pre)) > 把范围收成"真·行内"：代码块内那份不带 hljs 的原始 code
+   （.vditor-ir__marker--pre > code）原本也被这条吃进去，line-height:1 和 padding 会画进代码块。
+   :where() 不记特异性，仍是 0,5,1。
+   底留在 paper-3（对 paper-2 只差 ΔE 4.0）：中文行内码因 --font-mono 无汉字落回正文字体，
+   但分离不靠把底色压深硬扛，走 §4.2 那条路补一枚带汉字的等宽。 */
+.editor-page .vditor .vditor-reset :where(:not(pre)) > code:not(.hljs):not(.highlight-chroma) {
   font-family: var(--font-mono);
+  /* 0.875em 与阅读页同值：等宽字面在中文正文里比同字号汉字大一圈，1em 显重 */
   font-size: 0.875em;
   line-height: 1;
   color: var(--color-ink);
@@ -1247,7 +1842,7 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 .editor-page .vditor .vditor-reset table {
   display: table;
   width: 100%;
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   overflow: visible;
   border-collapse: collapse;
   word-break: normal;
@@ -1311,16 +1906,41 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 .editor-page .vditor .vditor-reset pre > code {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
+  /* 内衬 12px 与阅读页同档（库给 0.5em ≈ 6.8px），两端换行位置一致 */
+  padding: var(--space-sm);
   /* 库给代码块垫了一张 base64 网点纹理图 */
   background-image: none;
 }
 
+/* 行内码那条收了 :where(:not(pre)) 范围后，代码块内未高亮的那份原始 code
+   （展开态的 .vditor-ir__marker--pre > code，不带 hljs）不再被它盖住，
+   light.css 的 rgba(27,31,35,.05) 会漏进来画成一块比 pre 更深的补丁。
+   带 :not(.hljs) 是为了不碰 One Dark 那层底。 */
+.editor-page .vditor .vditor-reset pre > code:not(.hljs):not(.highlight-chroma) {
+  background-color: transparent;
+}
+
 /* IR 代码块的外层是 .vditor-ir__node，它自己不带外边距（库的 margin 挂在里面的 pre 上，
-   折不出节点框），所以与阅读页那一档 24 对不上，实测只差 12。补在外层上。 */
+   折不出节点框），所以与阅读页那一档 16 对不上，实测只差 12。补在外层上。 */
 .editor-page .vditor-ir__node[data-type='code-block'] {
   display: block;
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   font-family: var(--font-mono);
+}
+
+/* 折叠态库在节点上下各生成一个 content:' ' 的伪元素，pre-wrap 下各占一行行盒（实测 28），
+   与上面那档 16 叠成 44 的空带。展开态要留着——那两行是真正的 ``` 标记。 */
+.editor-page .vditor-ir__node[data-type='code-block']:not(.vditor-ir__node--expand)::before,
+.editor-page .vditor-ir__node[data-type='code-block']:not(.vditor-ir__node--expand)::after {
+  content: none;
+}
+
+/* 上带光收伪元素还剩 28：折叠态的两枚 ``` 标记是 0×0 的 inline-block，
+   仍会在 preview 之前撑出一个行盒。库已经把它们收成 0 尺寸，这里连行盒一起收掉。 */
+.editor-page
+  .vditor-ir__node[data-type='code-block']:not(.vditor-ir__node--expand)
+  .vditor-ir__marker {
+  display: none;
 }
 
 /* IR 代码块编辑态：常态与聚焦都用凹陷面，不随 --textarea-background-color 泛白。
@@ -1343,6 +1963,12 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   padding: var(--space-md) 0 !important;
 }
 
+/* 写作面漏掉的首块收口：上面那条内衬让首块的上边距折不出去，工具栏下方白多一档。
+   阅读面 .md-editor-preview 一直有这两条（首块去上边距、末块去下边距），两端对齐 */
+.editor-page .vditor-ir > pre.vditor-reset > :first-child {
+  margin-top: 0;
+}
+
 /* 浮层：下拉（标题/表格提示）、@ 补全、大纲统一为抬升面 + 发丝线 + 弱阴影 */
 .editor-page .vditor-panel,
 .editor-page .vditor-dropdown,
@@ -1362,7 +1988,10 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 
 /* 工具栏：单行、无边框按钮、全 Token。
    vditor 默认 float 布局改 flex 以统一间距与分组；
-   下拉面板绝对定位在按钮项内，故不可加 overflow 裁切 */
+   下拉面板绝对定位在按钮项内，故不可加 overflow 裁切。
+   间距取 --space-2xs：32px 方形按钮只留 2px 时相邻两枚的 hover 底色会黏成一块。
+   16 枚件（8 图标钮 + 4 文字钮 + 4 分隔线）按这档合计约 603px，窄于工具栏在卡内出血的
+   那一幅，仍是单行 */
 .editor-page .vditor-toolbar {
   position: sticky;
   top: var(--header-h);
@@ -1370,12 +1999,14 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3xs);
+  gap: var(--space-2xs);
   padding-block: var(--space-2xs);
   background-color: var(--color-paper-2);
   border-bottom: 1px solid var(--color-rule);
-  /* 画布已收窄，工具栏首键与正文左缘对齐：内衬归零，交给 .editor-sheet 那一档 */
-  padding-inline: 0 !important;
+  /* 吸顶时这条下沿分隔线要顶到卡片描边：外扩一档 .editor-sheet 内衬，再等值补回内衬，
+     使首键仍与正文左缘对齐 */
+  margin-inline: calc(-1 * var(--space-lg));
+  padding-inline: var(--space-lg) !important;
 }
 
 /* 按钮：2rem 方形无边框，交互与顶栏 icon-btn、首页列表一致 */
@@ -1459,7 +2090,7 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   width: auto;
   padding-inline: var(--space-xs);
   font-size: var(--text-sm);
-  color: var(--color-ink-2);
+  color: var(--color-ink-3);
 }
 
 .editor-page .cl-tb-label {
@@ -1472,12 +2103,15 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   color: var(--color-ink-4);
 }
 
-/* 功能分组：发丝细线。左右各让 --space-xs，整条 17px——
-   画布收进 --measure-prose 后工具栏只有 688px，四根分隔线再宽就把整条挤成两行 */
+/* 功能分组：发丝细线。左右各让 --space-xs，线本身 17px 高。
+   库在这一项上还挂着一对 margin-block: 8px（--toolbar-divider-margin-top），
+   会把它的行高撑到 36、整条工具栏顶到 45px；收掉后栏高回到 32 按钮 + 上下各 --space-2xs
+   + 1px 描边 = 41，与 --toolbar-height 声明的 2.5rem 对齐（scroll-margin-top 吃的是那个数） */
 .editor-page .vditor-toolbar__divider {
   height: 1.25rem;
   border-left: 1px solid var(--color-rule);
   margin-inline: var(--space-xs);
+  margin-block: 0;
 }
 
 /* 下拉面板菜单项（标题/列表/代码块/更多） */
@@ -1547,26 +2181,74 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
 
 /* 窄屏 */
 @media (max-width: 60rem) {
-  .settings-toggle {
-    display: grid;
-  }
-
   .publish-btn {
     padding-inline: var(--space-sm);
   }
 }
 
-@media (min-width: 60rem) {
-  .settings-toggle {
+/* ≤40rem：手机档。
+   标题与详情页文章头同降档（39px 在 375px 屏一行只落 8 个字）；
+   触控目标从 2rem 提到 2.5rem（WCAG 24px 过线，但 iOS HIG 44 / Material 48 的口径下 32px 偏小）；
+   工具栏收掉低频件（删除线/撤销/重做）并压紧间距，尽量少折行。
+   手机无大纲栏，scroll-margin 不随工具栏折行失准 */
+@media (max-width: 40rem) {
+  .editor-title,
+  .preview-sheet__title {
+    font-size: var(--text-lg);
+  }
+
+  .icon-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .publish-btn,
+  .drawer-btn {
+    height: 2.5rem;
+  }
+
+  /* 低频件整组收起（vditor 的 toolbar 项 className 落在外层 .vditor-toolbar__item 上） */
+  .editor-page .vditor-toolbar .cl-tb-opt {
     display: none;
   }
 
-  .editor-body {
-    grid-template-columns: minmax(0, 1fr) 17rem;
+  /* 收掉撤销/重做后，夹着它们的两条分隔线成了孤儿（display:none 仍占 DOM 邻位，
+     所以一条用 :has 看后邻、一条用 + 看前邻），一并收掉 */
+  .editor-page .vditor-toolbar__divider:has(+ .cl-tb-opt),
+  .editor-page .cl-tb-opt + .vditor-toolbar__divider {
+    display: none;
   }
 
-  .editor-panel {
+  .editor-page .cl-tb-text > button {
+    padding-inline: var(--space-2xs);
+  }
+
+  .editor-page .vditor-toolbar__divider {
+    margin-inline: var(--space-2xs);
+  }
+
+  .editor-page .vditor-toolbar__item > button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  /* 宽表格放不下：块级 + 横向滚动（GitHub 同款），与阅读页同一处理 */
+  .editor-page .vditor .vditor-reset table {
     display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (min-width: 60rem) {
+  .outline-toggle {
+    display: grid;
+  }
+
+  /* 大纲开启才出右列；关闭时单列，画布由 max-width 居中不偏 */
+  .editor-body.is-with-outline {
+    grid-template-columns: minmax(0, 1fr) 17rem;
   }
 }
 </style>

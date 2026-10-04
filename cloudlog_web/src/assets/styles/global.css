@@ -184,13 +184,15 @@ html:has(body.el-popup-parent--hidden) {
   line-height: 1.35;
   color: var(--color-ink);
   word-break: normal;
-  /* 上方 24 与引用/代码/表格/图同一档（块级分离），下方 12 让标题贴住自己那段文字——
-     层级靠这组不对称 + 字号差承载，不靠把上方拉到 40 */
-  margin: var(--space-lg) 0 var(--space-sm);
+  /* 上方 16 与引用/代码/表格同一档（块级分离），下方 12 让标题贴住自己那段文字；
+     章节级（h1/h2）上方再抬到 24：只比段距多出来的空气才扛得动「换了一章」的信号
+     （GitHub 24 / 掘金 30 同一取向），层级靠这组不对称 + 字号差承载，不靠把上方拉到 40 */
+  margin: var(--space-md) 0 var(--space-sm);
 }
 
 .md-editor.md-editor-previewOnly .md-editor-preview :is(h1, h2) {
   font-size: var(--text-xl);
+  margin-block-start: var(--space-lg);
 }
 
 .md-editor.md-editor-previewOnly .md-editor-preview h3 {
@@ -266,7 +268,7 @@ html:has(body.el-popup-parent--hidden) {
 /* ---- 引用 ---- */
 .md-editor.md-editor-previewOnly .md-editor-preview blockquote {
   display: flow-root;
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   padding: 0 var(--space-md);
   border-inline-start: 2px solid var(--color-rule-strong);
   background-color: transparent;
@@ -283,11 +285,11 @@ html:has(body.el-popup-parent--hidden) {
 }
 
 /* ---- 分隔线 ---- *
- * 与块级分离那一档同高（24）：它和引用、代码块是同一类「换了一块内容」的信号，
+ * 与块级分离那一档同高（16）：它和引用、代码块是同一类「换了一块内容」的信号，
  * 不需要比它们更重 */
 .md-editor.md-editor-previewOnly .md-editor-preview hr {
   height: 0;
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   border: none;
   border-block-start: 1px solid var(--color-rule);
   background: none;
@@ -308,7 +310,11 @@ html:has(body.el-popup-parent--hidden) {
   color: var(--color-accent-ink);
 }
 
-/* ---- 行内代码 ---- */
+/* ---- 行内代码 ---- *
+ * 底留在 --color-paper-3（对 paper-2 只差 ΔE 4.0）：分离不靠加深底色硬扛，
+ * 走 §4.2 那条路——给 --font-mono 补一枚带汉字的等宽，让字体自己把"这是代码"说出来。
+ * 字号 0.875em：等宽字面在中文正文里比同字号汉字大一圈，1em 显重（GitHub 同取 85%）；
+ * 与写作面 ArticleEditor.vue 同一组值，两端不出现"写作时一种样子、发布后另一种样子"。 */
 .md-editor.md-editor-previewOnly .md-editor-preview :not(pre) > code {
   font-family: var(--font-mono);
   font-size: 0.875em;
@@ -322,10 +328,9 @@ html:has(body.el-popup-parent--hidden) {
 /* ---- 代码块 ---- *
  * 块体本身吃 One Dark（§4.2），本站只管外边距、字号档位与圆角。 */
 .md-editor.md-editor-previewOnly .md-editor-preview .md-editor-code {
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   font-size: var(--text-sm);
   line-height: 1.6;
-  color: var(--color-ink-2);
 }
 
 .md-editor.md-editor-previewOnly .md-editor-preview .md-editor-code pre {
@@ -338,7 +343,9 @@ html:has(body.el-popup-parent--hidden) {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.6;
-  padding: var(--space-md);
+  /* 内衬 12px（--space-sm）：库给的 0.5em ≈ 6.8px 太贴边，写作面 pre > code 同步改成同值，
+     两端换行位置一致，「所见即所得」才成立 */
+  padding: var(--space-sm);
 }
 
 /* md-editor-v3 的代码头默认 position:sticky + z-index:10000，滚动时会
@@ -364,7 +371,7 @@ html:has(body.el-popup-parent--hidden) {
    hover 转 #eee 全是第二套色。分层改走发丝线 + 表头底色微差。 */
 .md-editor.md-editor-previewOnly .md-editor-preview table {
   width: 100%;
-  margin: var(--space-lg) 0;
+  margin: var(--space-md) 0;
   border-collapse: collapse;
 }
 
@@ -384,6 +391,16 @@ html:has(body.el-popup-parent--hidden) {
 
 .md-editor.md-editor-previewOnly .md-editor-preview tbody tr {
   background-color: transparent;
+}
+
+/* 窄屏宽表格放不下一栏：块级 + 横向滚动（GitHub 同款），别把单元格挤到不可读 */
+@media (max-width: 40rem) {
+  .md-editor.md-editor-previewOnly .md-editor-preview table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
 }
 
 /* ---- 图片 ---- *
@@ -428,11 +445,16 @@ html:has(body.el-popup-parent--hidden) {
   margin-block-end: 0;
 }
 
-
 /* 数字列对齐：日期、计数、排名 */
 .tnum {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* 定宽弹窗的窄屏兜底：编辑资料写的是 500px、改邮箱/改密是 26rem，
+ * 375px 屏下表单被裁、保存按钮跑出屏。一处收口，不逐个改 width */
+.el-dialog {
+  max-width: calc(100vw - 2rem);
 }
 
 @media (prefers-reduced-motion: reduce) {

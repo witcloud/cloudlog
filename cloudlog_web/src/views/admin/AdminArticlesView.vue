@@ -223,6 +223,7 @@ import type {
   ArticleStatus,
 } from '@/api/types/admin'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
+import { useUrlFilters } from '@/composables/useUrlFilters'
 import dayjs from 'dayjs'
 
 const loading = ref(false)
@@ -230,7 +231,6 @@ const articles = ref<AdminArticleItem[]>([])
 const total = ref(0)
 const authors = ref<AdminAuthor[]>([])
 const categories = ref<AdminCategoryItem[]>([])
-const dateRange = ref<[string, string] | null>(null)
 
 const query = reactive<AdminArticleQuery>({
   page: 1,
@@ -243,6 +243,21 @@ const query = reactive<AdminArticleQuery>({
   endDate: null,
 })
 
+/** 日期区间直接落在 query 那两个字段上（原先是另一个 ref，取数时才拼回去）：
+ *  只有进得了 query 的条件才进得了地址栏，否则分享出去的链接少一半条件 */
+const dateRange = computed({
+  get: (): [string, string] | null =>
+    query.startDate && query.endDate
+      ? ([query.startDate, query.endDate] as [string, string])
+      : null,
+  set: (range: [string, string] | null) => {
+    query.startDate = range?.[0] ?? null
+    query.endDate = range?.[1] ?? null
+  },
+})
+
+useUrlFilters(query)
+
 const hasFilter = computed(
   () => !!(query.keyword || query.status || query.authorId || query.categoryId || dateRange.value),
 )
@@ -252,11 +267,7 @@ const emptyTitle = computed(() => (hasFilter.value ? '没有符合条件的文�
 const fetchArticles = async () => {
   loading.value = true
   try {
-    const { data } = await getAdminArticles({
-      ...query,
-      startDate: dateRange.value?.[0] ?? null,
-      endDate: dateRange.value?.[1] ?? null,
-    })
+    const { data } = await getAdminArticles(query)
     articles.value = data.list
     total.value = Number(data.total) // PageResult.total 以字符串下发（Long 统一转字符串），分页器要 number
   } catch (error) {
@@ -299,7 +310,10 @@ const clearFilters = () => {
 
 const confirmDelete = (row: AdminArticleItem) => {
   ElMessageBox.confirm(
-    `确定要删除文章「${row.title}」吗？其评论与标签关联将一并清除，此操作不可恢复。`,
+    // 连带范围按后端 cascadeDelete 的实删清单说：它还清点赞、并把封面与正文配图的对象回收掉，
+    // 而回收不看这张图有没有被别的文章引用（ArticleService.java:271-281）
+    `确定要删除文章「${row.title}」吗？其评论、标签关联与点赞记录一并清除；` +
+      '本文用到的封面与正文配图也会从对象存储删除，若同样的地址出现在别的文章里，那些图会一起失效。此操作不可恢复。',
     '删除文章',
     { confirmButtonText: '删除', cancelButtonText: '取消', type: 'error' },
   ).then(async () => {

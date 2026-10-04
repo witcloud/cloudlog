@@ -106,6 +106,12 @@ public interface PostMapper {
     List<Long> findDraftIdsByAuthor(@Param("authorId") Long authorId);
 
     /**
+     * 只取封面与正文两列，供删除级联算出这篇文章引用了哪些对象（business-model.md §3.3 图片对象回收）。
+     * 不复用 findById：级联三条路径都只要这两列，详情那条查询还带作者与分类两个 JOIN
+     */
+    Post findCoverAndContent(@Param("id") Long id);
+
+    /**
      * 清空文章的发布时间（scheduled 撤下为 draft 时恢复「从未发布」语义）
      */
     int clearPublishedAt(@Param("id") Long id);

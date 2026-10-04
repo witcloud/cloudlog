@@ -1,7 +1,7 @@
 <template>
-  <div class="toc-sidebar">
-    <section class="toc-panel">
-      <p class="toc-panel__label">目录</p>
+  <div class="toc-sidebar" :class="{ 'is-embedded': embedded }">
+    <section class="toc-panel" :class="{ 'is-embedded': embedded }">
+      <p v-if="!embedded" class="toc-panel__label">目录</p>
       <div ref="listRef" class="toc-panel__content">
         <button
           v-for="item in tocItems"
@@ -31,6 +31,9 @@ interface TocItem {
 const props = defineProps<{
   tocItems: TocItem[]
   activeIndex: number | null
+  /** 嵌入宿主面板（编辑器侧栏 tab）时为 true：去 sticky 与外框，边框由宿主提供。
+      默认 false，详情页零影响 */
+  embedded?: boolean
 }>()
 
 const emit = defineEmits<{ (e: 'navigate', index: number): void }>()
@@ -135,5 +138,29 @@ watch(
   padding-inline-start: var(--space-md);
   font-size: var(--text-sm);
   color: var(--color-ink-4);
+}
+
+/* ---- 嵌入态（编辑器侧栏）---- *
+ * sticky 与卡片外框都不做：宿主面板提供定位、边框与纵向约束，列表撑满剩余高度内部滚动，
+ * 高亮项保持可见的机制照常生效 */
+.toc-sidebar.is-embedded {
+  position: static;
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+}
+
+.toc-panel.is-embedded {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+/* 宿主面板无内衬，内容区不再负外边距外扩，指示条直接贴住面板左缘的边框线 */
+.toc-panel.is-embedded .toc-panel__content {
+  margin-inline: 0;
 }
 </style>

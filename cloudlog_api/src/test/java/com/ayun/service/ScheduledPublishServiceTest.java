@@ -76,11 +76,17 @@ class ScheduledPublishServiceTest {
     // ---- S2：未到期不发布 ----
 
     @Test
-    @DisplayName("未到期不发布：谓词要求计划时刻已到")
+    @DisplayName("未到期不发布：谓词按计划时刻过滤，NOW() 与 TIMESTAMP 列同靠会话时区这一个基")
     void scanOnlyMatchesRowsWhosePlannedTimeHasPassed() {
         String where = whereClause(publishDueSql());
 
         assertTrue(where.contains("published_at <= NOW()"), "谓词需按计划时刻过滤：" + where);
+        // published_at 是 TIMESTAMP：MySQL 按会话时区换算列值，NOW() 也在同一会话里取，两者天然同基；
+        // 会话由连接串显式钉成 +08:00（DataSourceTimeZoneTest 断言）。
+        // 把 NOW() 换成写死的 CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00') 会打破这个对称——
+        // 会话一旦不是 +08，列值跟着漂而写死的基准不漂，谓词就凭空差 8 小时。别那么改
+        assertFalse(where.contains("CONVERT_TZ(UTC_TIMESTAMP()"),
+                "谓词里不该出现写死的偏移量基准：" + where);
     }
 
     @Test

@@ -177,9 +177,11 @@ import type { SystemSettings } from '@/api/types/admin'
 import type { AboutContent } from '@/api/types/site'
 import AvatarUpload from '@/components/AvatarUpload.vue'
 import { useUserStore } from '@/stores/user'
+import { useSiteStore } from '@/stores/site'
 import { formatMinioUrl } from '@/config'
 
 const userStore = useUserStore()
+const siteStore = useSiteStore()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -259,6 +261,8 @@ const save = async () => {
     ElMessage.success('设置已保存')
     fetchSettings()
     fetchAboutContent()
+    // 前台读的是 site store 那份内存缓存，不重拉的话「立即生效」对站点名并不成立
+    void siteStore.load()
   } catch (error) {
     console.error('保存系统设置失败:', error)
   } finally {

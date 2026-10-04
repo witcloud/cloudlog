@@ -3,6 +3,12 @@
     <el-skeleton :rows="10" animated />
   </div>
   <div v-else-if="article" class="article-detail">
+    <!-- 阅读进度：2px 细线钉在视口顶缘（压过吸顶顶栏一层），滚动进度走 scaleX 不触发重排 -->
+    <div
+      class="article-progress"
+      :style="{ transform: `scaleX(${readingProgress})` }"
+      aria-hidden="true"
+    ></div>
     <div class="article-detail__main">
       <div class="article-detail__post">
         <ArticleHeader
@@ -13,23 +19,50 @@
           @toggle-follow="toggleFollow"
         />
 
-        <div class="article-detail__content" @click="onProseClick">
+        <!-- 窄屏右栏不渲染：长文导航收进正文卡，随用随开；≥60rem 交给右栏吸顶目录 -->
+        <details v-if="tocItems.length" ref="mobileTocEl" class="article-toc-mobile">
+          <summary>
+            目录
+            <span class="article-toc-mobile__count tnum">{{ tocItems.length }}</span>
+          </summary>
+          <nav class="article-toc-mobile__list" aria-label="文章目录">
+            <button
+              v-for="item in tocItems"
+              :key="item.key"
+              :class="['article-toc-mobile__item', { 'is-sub': item.level > tocMinLevel }]"
+              type="button"
+              @click="jumpFromMobileToc(item.index)"
+            >
+              {{ item.text }}
+            </button>
+          </nav>
+        </details>
+
+        <div
+          ref="contentEl"
+          class="article-detail__content"
+          @click="onProseClick"
+          @keydown="onProseKeydown"
+        >
           <!-- no-img-zoom-in：库默认给正文图绑 medium-zoom，点击只能放大到原图尺寸、
-               不响应 ESC、也没有滚轮缩放。看图走下面的 ImageLightbox，两层不能并存 -->
+               不响应 ESC、也没有滚轮缩放。看图走下面的 ImageLightbox，两层不能并存。
+               show-code-row-number 关掉：库默认开着行号槽，用 !important 把左侧撑到 3.5em，
+               但这里实测一个行号都没渲染出来（[rn-wrapper] 数量 0），只剩一条空栏位 -->
           <md-preview
-                  :model-value="article.content ?? ''"
-                  :theme="isDark ? 'dark' : 'light'"
-                  :no-img-zoom-in="true"
-                  code-theme="one-dark"
-                  :sanitize="sanitizeHtml"
-                />
+            :model-value="article.content ?? ''"
+            :theme="isDark ? 'dark' : 'light'"
+            :no-img-zoom-in="true"
+            :show-code-row-number="false"
+            code-theme="one-dark"
+            :sanitize="sanitizeHtml"
+            :on-html-changed="onPreviewRendered"
+          />
         </div>
 
         <!-- 正文页脚：标签在左、互动按钮在右，共用上方那条发丝线。
              互动按钮是同一组的第二副面孔——≥84rem 它钉在容器左侧成竖栏，不足时顺流落在这里 -->
         <div class="article-detail__foot">
-        <div v-if="article.tags?.length" class="article-detail__tags tnum">
-          <span class="article-detail__tags-label">标签：</span>
+        <nav v-if="article.tags?.length" class="article-detail__tags" aria-label="文章标签">
           <RouterLink
             v-for="tag in article.tags"
             :key="tag.id"
@@ -38,7 +71,7 @@
           >
             #{{ tag.name }}
           </RouterLink>
-        </div>
+        </nav>
       <nav class="article-floatbar" aria-label="文章快捷操作">
         <button
           class="article-floatbar__btn article-floatbar__back"
@@ -170,7 +203,7 @@
             @toggle-follow="toggleFollow"
           />
         </div>
-        <TocSidebar :toc-items="tocItems" :active-index="activeTocIndex" @navigate="scrollToToc" />
+        <TocSidebar :toc-items="tocItems" :active-index="activeIndex" @navigate="scrollToToc" />
       </div>
     </aside>
 
@@ -216,6 +249,7 @@ import { useArticleStore } from '@/stores/article'
 import { useSiteStore } from '@/stores/site'
 import { useUserStore } from '@/stores/user'
 import { useTheme } from '@/composables/useTheme'
+import { useMarkdownToc } from '@/composables/useMarkdownToc'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
@@ -251,94 +285,46 @@ const canEdit = computed(() => {
 const lightboxVisible = ref(false)
 const lightboxSrc = ref('')
 
-const onProseClick = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  if (target.tagName !== 'IMG') return
-  const image = target as HTMLImageElement
+const openLightbox = (image: HTMLImageElement) => {
   lightboxSrc.value = image.currentSrc || image.src
   lightboxVisible.value = true
 }
 
-// Extract TOC items：优先读取 md-editor 渲染后的真实标题元素（同名标题也能按序号区分），回退到文本推导
-interface TocEntry {
-  key: string
-  id: string
-  text: string
-  level: number
-  index: number
+const onProseClick = (event: MouseEvent) => {
+  const target = event.target as HTMLElement
+  if (target.tagName !== 'IMG') return
+  openLightbox(target as HTMLImageElement)
 }
 
-const tocHeadings = ref<HTMLElement[]>([])
-const domTocItems = ref<TocEntry[]>([])
+/** 键盘走同一条路：插图原先只有鼠标能放大，Tab 根本停不下来 */
+const onProseKeydown = (event: KeyboardEvent) => {
+  const target = event.target as HTMLElement
+  if (target.tagName !== 'IMG') return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  openLightbox(target as HTMLImageElement)
+}
 
-const derivedTocItems = computed<TocEntry[]>(() => {
-  if (!article.value?.content) return []
-
-  const headings: TocEntry[] = []
-  const reg = /^(#+)\s+(.+)$/
-  let inFence = false
-
-  // 逐行跟踪代码围栏：块内的 `# 注释` 不是标题，整行匹配会把它收进目录
-  for (const line of article.value.content.split('\n')) {
-    if (/^(?:```|~~~)/.test(line.trimStart())) {
-      inFence = !inFence
-      continue
-    }
-    if (inFence) continue
-
-    const match = reg.exec(line)
-    if (!match) continue
-
-    // +1 对齐 DOM 那条来源：正文标题渲染后会被整体下移一级
-    const level = (match[1] ?? '').length + 1
-    const text = match[2] ?? ''
-    // Simple ID generation from text
-    const id = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
-    const index = headings.length
-    headings.push({ key: `${id}-${index}`, id, text, level, index })
+/**
+ * 渲染后给正文每张图补两件事：可聚焦（配上面的 keydown）与一句最低限度的 alt。
+ * 作者写 `![](url)` 时不会想到读屏，落成 alt="" 等于这张图对读屏不存在。
+ * 不改 role：img 换成 button 会把「这是一张图」这层语义整个丢掉。
+ */
+const makeImagesOperable = (root: HTMLElement) => {
+  for (const node of Array.from(root.querySelectorAll('img'))) {
+    const image = node as HTMLImageElement
+    if (!image.getAttribute('alt')) image.setAttribute('alt', image.title || '正文插图')
+    if (image.dataset.lightboxReady) continue
+    image.dataset.lightboxReady = '1'
+    image.setAttribute('tabindex', '0')
   }
-
-  return headings
-})
-
-const tocItems = computed(() => (domTocItems.value.length ? domTocItems.value : derivedTocItems.value))
-
-// ---- 目录跟随滚动 ----
-// 判定线读正文标题的 scroll-margin-top 计算值，与点击落点共用同一个数；
-// 不用 location.hash 定位：同名标题会撞出重复 id，getElementById 永远跳到第一个
-const activeTocIndex = ref<number | null>(null)
-const tocReadingLine = ref(0)
-
-// 落点按 devicePixelRatio 吸附到半像素（dpr 2 实测偏 0.1px），不留容差会亮在前一条
-const TOC_LINE_TOLERANCE = 1
-
-const updateActiveToc = () => {
-  const headings = tocHeadings.value
-  if (!headings.length) {
-    activeTocIndex.value = null
-    return
-  }
-  const line = tocReadingLine.value + TOC_LINE_TOLERANCE
-  let current: number | null = null
-  headings.forEach((h, i) => {
-    if (h.getBoundingClientRect().top <= line) current = i
-  })
-  activeTocIndex.value = current
 }
 
-let tocSpyFrame = 0
-const onTocSpyScroll = () => {
-  if (tocSpyFrame) return
-  tocSpyFrame = requestAnimationFrame(() => {
-    tocSpyFrame = 0
-    updateActiveToc()
-  })
-}
-
+// ---- 目录：逻辑抽在 useMarkdownToc（编辑器大纲共用），DOM 优先、源码推导兜底 ----
 /* 页面大标题已经是唯一的 h1，正文里 `#` 渲染出的 h1 与它同级是语义错误。
    作者该能随便用 `#`：所以渲染后整体下移一级，级别归位、字号由 global.css 的档位跟着移，观感不变。
    逐个元素打标记而不是按容器打：md-editor 换文章会重建子节点，标记随节点消失，
-   而本函数会被 nextTick 与 300ms 兜底各调一次，没标记就会二次下移 */
+   而本函数会在每次渲染后的收集前各调一次，没标记就会二次下移 */
 const demoteBodyHeadings = (root: HTMLElement) => {
   for (let level = 1; level <= 5; level++) {
     root.querySelectorAll(`h${level}:not([data-demoted])`).forEach((node) => {
@@ -352,37 +338,39 @@ const demoteBodyHeadings = (root: HTMLElement) => {
   }
 }
 
-const collectTocFromDom = () => {
-  const content = document.querySelector('.article-detail__content')
-  if (content) demoteBodyHeadings(content as HTMLElement)
+const contentEl = ref<HTMLElement>()
 
-  const nodes = document.querySelectorAll(
-    '.article-detail__content h1, .article-detail__content h2, .article-detail__content h3, .article-detail__content h4, .article-detail__content h5',
-  )
-  const els = Array.from(nodes) as HTMLElement[]
-  const first = els[0]
-  if (!first) return
-  tocHeadings.value = els
-  tocReadingLine.value = Number.parseFloat(getComputedStyle(first).scrollMarginTop) || 0
-  domTocItems.value = els.map((h, index) => ({
-    key: `${h.id || 'toc'}-${index}`,
-    id: h.id,
-    text: h.textContent?.trim() ?? '',
-    level: Number(h.tagName.slice(1)),
-    index,
-  }))
-  updateActiveToc()
+// levelOffset 1 对齐上面那条「整体下移一级」的渲染链；降级挂在 beforeCollect 上，
+// 任何一次收集（含 composable 落一拍的兜底）拿到的都是归位后的级别
+const { tocItems, activeIndex, containerRef, refresh, scrollTo: scrollToToc, startFollow } =
+  useMarkdownToc({
+    source: computed(() => article.value?.content ?? ''),
+    levelOffset: 1,
+    beforeCollect: (root) => {
+      demoteBodyHeadings(root)
+      // 插图的可聚焦与 alt 挂在同一处：这是本组件唯一保证「渲染之后」跑到的时机
+      makeImagesOperable(root)
+    },
+  })
+
+// ---- 窄屏内嵌目录：与右栏吸顶目录共用同一份 tocItems，点击跳转后收起 ----
+const mobileTocEl = ref<HTMLDetailsElement>()
+const tocMinLevel = computed(() => Math.min(...tocItems.value.map((item) => item.level), 6))
+
+const jumpFromMobileToc = (index: number) => {
+  mobileTocEl.value?.removeAttribute('open')
+  scrollToToc(index)
 }
 
-// 同名标题的 id 会重复，按目录序号定位到对应元素
-const scrollToToc = (index: number) => {
-  activeTocIndex.value = index
-  const heading = tocHeadings.value[index]
-  if (heading) {
-    heading.scrollIntoView({ behavior: 'smooth' })
-    return
-  }
-  document.getElementById(tocItems.value[index]?.id ?? '')?.scrollIntoView({ behavior: 'smooth' })
+const bindTocContainer = () => {
+  containerRef.value = contentEl.value ?? null
+  refresh()
+}
+
+// md-editor-v3 渲染完成（modelValue 之后的宏任务）后再绑定收一次，兜住首次渲染晚于首次收集；
+// 重复绑定幂等
+const onPreviewRendered = () => {
+  nextTick(bindTocContainer)
 }
 
 /**
@@ -421,9 +409,20 @@ const loadArticle = async (id?: string) => {
   applySeoMeta()
 }
 
+// ---- 阅读进度：已滚过 / 可滚总高。监听常驻，切文回顶由 loading 后的一次重算校正 ----
+const readingProgress = ref(0)
+
+const updateReadingProgress = () => {
+  const doc = document.documentElement
+  const total = doc.scrollHeight - doc.clientHeight
+  readingProgress.value = total > 0 ? Math.min(1, Math.max(0, doc.scrollTop / total)) : 0
+}
+
 onMounted(async () => {
-  window.addEventListener('scroll', onTocSpyScroll, { passive: true })
+  // 滚动跟随的监听挂载/卸载由 composable 托管
+  startFollow()
   railQuery.addEventListener('change', onRailChange)
+  window.addEventListener('scroll', updateReadingProgress, { passive: true })
   await loadArticle(route.params.id as string)
 })
 
@@ -490,27 +489,23 @@ watch(
   () => [loading.value, article.value?.id],
   ([isLoading]) => {
     if (isLoading) {
-      domTocItems.value = []
-      // 切文章时丢掉上一篇的标题元素引用，否则会拿旧节点算高亮
-      tocHeadings.value = []
-      activeTocIndex.value = null
+      // 切文章时断开容器并重收一次：丢掉上一篇的标题元素引用，滚动高亮才不会拿旧节点算
+      containerRef.value = null
+      refresh()
       return
     }
     observeAuthorCard()
-    // md-editor 渲染完成后读取真实标题锚点，并做一次延迟兜底
-    nextTick(() => {
-      collectTocFromDom()
-      setTimeout(collectTocFromDom, 300)
-    })
+    // 新文渲染后重算一次阅读进度（换文章时高度变了，进度条不回算会停在旧刻度）
+    nextTick(updateReadingProgress)
+    // md-editor 渲染完成后绑定正文容器收集真实标题锚点（on-html-changed 会再各收一次）
+    nextTick(bindTocContainer)
   },
   { immediate: true },
 )
 
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', onTocSpyScroll)
   railQuery.removeEventListener('change', onRailChange)
-  if (tocSpyFrame) cancelAnimationFrame(tocSpyFrame)
-  tocSpyFrame = 0
+  window.removeEventListener('scroll', updateReadingProgress)
   authorCardObserver?.disconnect()
   authorCardObserver = null
 })
@@ -651,8 +646,10 @@ const shareTo = (platform: 'weibo' | 'copy') => {
 }
 
 /* 正文与评论各自独立成面（卡片范式 docs/ui-design.md §6.2）：
-   paper 与 paper-2 只差 1.5% L，分层靠发丝线描边 + 一枚极轻阴影。
-   内衬与右栏作者卡、目录面板同为 --space-md */
+   paper 与 paper-2 只差 1.5% L，分层靠发丝线描边 + 一枚极轻阴影 */
+/* 正文卡收在 --measure-prose、与右栏整组居中：文字列 688px ≈ 43 字/行，与编辑器写作面同宽，
+   两端换行位置一致，「所见即所得」成立。容器余量归还两侧——≥84rem 那一侧由悬浮栏占用，
+   不再让正文撑满主栏摊到 53 字/行；评论卡与正文卡同轨同内衬，文字左缘上下对齐 */
 .article-detail__main {
   min-width: 0;
   display: flex;
@@ -661,17 +658,17 @@ const shareTo = (platform: 'weibo' | 'copy') => {
 }
 
 .article-detail__comments {
-  padding: var(--space-md);
+  padding: var(--space-lg);
   background-color: var(--color-paper-2);
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-whisper);
 }
 
-/* 与下方评论卡吃同一档内衬：两张面同处一列，文字左缘必须上下对齐。
-   早先这里把正文收在 --measure-prose 并把余量均分到两侧，结果是正文比评论缩进 52px。 */
+/* 与下方评论卡同轨同内衬（--space-lg）：两张面文字左缘必须上下对齐；
+   内衬从 16 升到 24，文字不再贴着卡缘（掘金/知乎同一档） */
 .article-detail__post {
-  padding: var(--space-md);
+  padding: var(--space-lg);
   background-color: var(--color-paper-2);
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-sm);
@@ -686,37 +683,133 @@ const shareTo = (platform: 'weibo' | 'copy') => {
   }
 }
 
-/* 正文页脚：上方一条发丝线与正文分隔，线上留白与文章头那条线同一套（两侧各 --space-lg）。
+/* 阅读进度条：2px 与发丝线同一量级，色用唯一强调色 */
+.article-progress {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  height: 2px;
+  z-index: calc(var(--z-sticky) + 1);
+  background-color: var(--color-accent);
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+
+/* ---- 窄屏内嵌目录：右栏 60rem 才渲染，手机上的长文导航由它承担 ---- */
+.article-toc-mobile {
+  display: none;
+  margin-bottom: var(--space-md);
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-paper-3);
+}
+
+@media (max-width: 59.9375rem) {
+  .article-toc-mobile {
+    display: block;
+  }
+}
+
+.article-toc-mobile summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.article-toc-mobile summary::-webkit-details-marker {
+  display: none;
+}
+
+/* chevron 用两条 1.5px 边拼成，开合旋转，与全站图标同一语言 */
+.article-toc-mobile summary::after {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-inline-start: auto;
+  border-inline-end: 1.5px solid var(--color-ink-3);
+  border-block-end: 1.5px solid var(--color-ink-3);
+  transform: rotate(45deg) translateY(-0.1rem);
+  transition: transform var(--dur-micro) var(--ease-out);
+}
+
+.article-toc-mobile[open] summary::after {
+  transform: rotate(-135deg) translateY(-0.1rem);
+}
+
+.article-toc-mobile__list {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-xs);
+  padding-top: var(--space-2xs);
+  border-top: 1px solid var(--color-rule);
+}
+
+.article-toc-mobile__item {
+  padding: var(--space-2xs) 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: start;
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  cursor: pointer;
+}
+
+.article-toc-mobile__item.is-sub {
+  padding-inline-start: var(--space-md);
+  color: var(--color-ink-3);
+}
+
+.article-toc-mobile__item:hover {
+  color: var(--color-accent);
+}
+
+.article-toc-mobile__count {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--color-ink-3);
+}
+
+/* 正文页脚：上方一条发丝线与正文分隔，线上留白与文章头那条线同一套（两侧各 --space-md）。
    标签在左、互动按钮在右；无标签时按钮独占该行，发丝线仍在 */
 .article-detail__foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
-  margin-top: var(--space-lg);
-  padding-top: var(--space-lg);
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
   border-top: 1px solid var(--color-rule);
 }
 
+/* 标签 chip：凹陷面小药丸（主流平台的 tag 形态），hover 洗染 + 强调色 */
 .article-detail__tags {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  font-size: var(--text-xs);
-  color: var(--color-ink-3);
+  gap: var(--space-2xs);
 }
 
 .article-detail__tag {
-  transition: color var(--dur-micro) var(--ease-out);
-}
-
-/* 首个标签紧跟「标签：」，只有标签之间留一档间距 */
-.article-detail__tag + .article-detail__tag {
-  margin-left: var(--space-sm);
+  padding: var(--space-3xs) var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  background-color: var(--color-paper-3);
+  border-radius: var(--radius-sm);
+  transition:
+    color var(--dur-micro) var(--ease-out),
+    background-color var(--dur-micro) var(--ease-out);
 }
 
 .article-detail__tag:hover {
   color: var(--color-accent);
+  background-color: var(--color-accent-wash);
 }
 
 .article-detail__aside {
@@ -978,7 +1071,10 @@ button.article-missing__action {
 
 @media (min-width: 60rem) {
   .article-detail {
-    grid-template-columns: minmax(0, 1fr) 15rem;
+    /* 正文轨道封顶 --measure-prose、整组居中：文字列与编辑器写作面同宽（换行一致），
+       窄容器（60–65rem 视口）先让正文轨道收缩，不会溢出 */
+    grid-template-columns: minmax(0, var(--measure-prose)) 15rem;
+    justify-content: center;
   }
 }
 </style>

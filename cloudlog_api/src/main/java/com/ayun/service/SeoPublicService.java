@@ -11,7 +11,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -167,17 +166,20 @@ public class SeoPublicService {
         return text.replace("]]>", "]]]]><![CDATA[>");
     }
 
-    /** ISO 8601 带本地时区偏移；时刻为空即返回 null，由调用方省略整个元素 */
+    /**
+     * ISO 8601 带时区偏移。列值是北京墙钟，偏移就申报 +08:00——按运行时时区读会把 12:00 当成
+     * 那个时区的 12:00，容器跑 UTC 时整份 sitemap 的时刻早 8 小时。时刻为空即返回 null，由调用方省略整个元素
+     */
     private String formatW3cDateTime(LocalDateTime moment) {
-        return moment == null ? null : W3C_DATETIME.format(moment.atZone(ZoneId.systemDefault()));
+        return moment == null ? null : W3C_DATETIME.format(moment.atZone(ArticleService.BUSINESS_ZONE));
     }
 
-    /** RSS 的日期必须落在 GMT 上，按运行时时区换算过去 */
+    /** RSS 的日期必须落在 GMT 上：先按北京墙钟认住这一列，再换算成 UTC（换算只在这份出站产物里发生） */
     private String formatRssDate(LocalDateTime moment) {
         if (moment == null) {
             return null;
         }
-        return RSS_DATE_TIME.format(moment.atZone(ZoneId.systemDefault())
+        return RSS_DATE_TIME.format(moment.atZone(ArticleService.BUSINESS_ZONE)
                 .withZoneSameInstant(ZoneOffset.UTC));
     }
 }

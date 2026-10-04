@@ -17,8 +17,18 @@
       <RouterLink class="article-header__author" :to="`/authors/${article.author.id}`">{{
         article.author.username
       }}</RouterLink>
+      <template v-if="article.category">
+        <span aria-hidden="true">·</span>
+        <RouterLink
+          class="article-header__category"
+          :to="{ path: '/', query: { categoryId: article.category.id } }"
+          >{{ article.category.name }}</RouterLink
+        >
+      </template>
       <span aria-hidden="true">·</span>
       <span>{{ article.views }} 次阅读</span>
+      <span aria-hidden="true">·</span>
+      <span>约 {{ readingMinutes }} 分钟读完</span>
       <button v-if="canEdit" class="article-header__edit" @click="$emit('edit')">编辑</button>
     </div>
   </header>
@@ -48,6 +58,14 @@ const followed = computed(() => props.article.author.followed ?? false)
 const formatDate = (date: string) => {
   return dayjs(date).format('YYYY-MM-DD')
 }
+
+// 预计阅读时长：CJK 350 字/分钟 + 英文 200 词/分钟（主流平台同一量级口径），代码块不计
+const readingMinutes = computed(() => {
+  const text = (props.article.content ?? '').replace(/```[\s\S]*?```/g, ' ')
+  const cjk = (text.match(/[\u4e00-\u9fff]/g) ?? []).length
+  const words = (text.match(/[A-Za-z0-9][A-Za-z0-9'’._-]*/g) ?? []).length
+  return Math.max(1, Math.round(cjk / 350 + words / 200))
+})
 </script>
 
 <style scoped>
@@ -58,9 +76,9 @@ const formatDate = (date: string) => {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: var(--space-md);
-  padding-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
   border-bottom: 1px solid var(--color-rule);
-  margin-bottom: var(--space-lg);
+  margin-bottom: var(--space-md);
 }
 
 .article-header__title {
@@ -80,7 +98,8 @@ const formatDate = (date: string) => {
   align-items: center;
   gap: var(--space-xs);
   margin-top: var(--space-md);
-  font-size: var(--text-xs);
+  /* 12px 的中文 meta 在移动端贴近可读下限，主流平台 meta 行是 13–14px */
+  font-size: var(--text-sm);
   color: var(--color-ink-3);
 }
 
@@ -107,8 +126,19 @@ const formatDate = (date: string) => {
   color: var(--color-accent);
 }
 
+.article-header__category {
+  color: inherit;
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.article-header__category:hover {
+  color: var(--color-accent);
+}
+
 .article-header__edit {
-  margin-left: var(--space-2xs);
+  /* 12px 纯文本的点击目标太小：内衬扩出 hit area，再用等值负 margin 抵回版面 */
+  padding: var(--space-2xs);
+  margin-block: calc(-1 * var(--space-2xs));
   font-size: var(--text-xs);
   color: var(--color-accent);
 }

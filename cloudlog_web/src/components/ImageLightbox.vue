@@ -162,6 +162,9 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: var(--z-lightbox);
   display: grid;
+  /* 轨道必须定高：隐式行按内容 auto 撑开，图上的 max-height:100% 就没有基准，
+     300×2100 的长图会按原尺寸把整张顶出视口 */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   padding: var(--space-2xl) var(--space-xl) var(--space-xl);
   background-color: var(--color-stage);

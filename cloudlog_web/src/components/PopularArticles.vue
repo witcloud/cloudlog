@@ -2,11 +2,14 @@
   <section class="popular" aria-label="热门文章">
     <header class="popular__head">
       <p class="panel-label">热门文章</p>
-      <button class="popular__refresh" :disabled="loading" @click="handleRefresh">换一换</button>
+      <!-- 池子不足一页时「换一换」点了不会有任何变化（重拉回来还是那几条），那一句就说「刷新」 -->
+      <button class="popular__refresh" :disabled="loading" @click="handleRefresh">
+        {{ canRotate ? '换一换' : '刷新' }}
+      </button>
     </header>
 
     <Transition name="popular-fade" mode="out-in">
-      <ol :key="currentPage" class="popular__list">
+      <ol v-if="displayArticles.length" :key="currentPage" class="popular__list">
         <li
           v-for="(item, index) in displayArticles"
           :key="item.id"
@@ -14,10 +17,18 @@
           @click="goToDetail(item.id)"
         >
           <span class="popular__rank tnum">{{ getGlobalIndex(index) + 1 }}</span>
-          <span class="popular__title" :title="item.title">{{ item.title }}</span>
+          <!-- 真链接：整行 @click 只有鼠标能走，Tab 到不了、中键/Ctrl+点击也开不了新标签 -->
+          <RouterLink class="popular__title" :to="`/articles/${item.id}`" :title="item.title">
+            {{ item.title }}
+          </RouterLink>
         </li>
       </ol>
     </Transition>
+
+    <p v-if="loadFailed" class="popular__empty">
+      热榜没有加载出来。
+      <button type="button" class="popular__retry" @click="fetchHotArticles">重试</button>
+    </p>
   </section>
 </template>
 
@@ -41,6 +52,11 @@ const router = useRouter()
 const loading = ref(false)
 const articlePool = ref<HotArticle[]>([])
 const currentPage = ref(0)
+/** 拉失败要单独说：热榜取不到时屏幕上只剩一个标题，读起来像「这位作者没有热文」 */
+const loadFailed = ref(false)
+
+/** 池子里是否还有下一页可换 */
+const canRotate = computed(() => articlePool.value.length > props.pageSize)
 
 const displayArticles = computed(() => {
   if (articlePool.value.length === 0) return []
@@ -54,12 +70,14 @@ const getGlobalIndex = (index: number) => {
 
 const fetchHotArticles = async () => {
   loading.value = true
+  loadFailed.value = false
   try {
     const { data } = await getHotArticles({ limit: props.poolSize })
     articlePool.value = data
     currentPage.value = 0
   } catch {
-    // 失败提示由响应拦截器统一弹出，这里不重复；热榜取不到就留空列表
+    // 失败提示由响应拦截器统一弹出，这里只记下故障，让空位上能写一句真话
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
@@ -147,6 +165,7 @@ onMounted(() => {
   font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-ink-2);
+  text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -155,6 +174,27 @@ onMounted(() => {
 
 .popular__item:hover .popular__title {
   color: var(--color-accent);
+}
+
+/* 拉失败时占住列表的位置：右栏这里空着，读起来会像「还没有热文」而不是「没拉到」 */
+.popular__empty {
+  padding-block: var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--color-ink-4);
+}
+
+.popular__retry {
+  border: 0;
+  padding: 0;
+  background: none;
+  font-size: inherit;
+  color: var(--color-accent-ink);
+  cursor: pointer;
+}
+
+.popular__retry:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
 }
 
 .popular-fade-enter-active,

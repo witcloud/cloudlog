@@ -253,6 +253,11 @@ public class AuthService {
      * @param email 用户邮箱
      */
     public void sendRegistrationCode(String email) {
+        // 与 register() 同一道闸，且排在发码之前：注册已关闭时，直接打这个接口的人
+        // 不该先收到一封邮件、占掉一枚码，再在下一步被告知此路不通
+        if (!settingsService.getBoolean(SettingsService.KEY_REGISTRATION_ENABLED, true)) {
+            throw new BizException("当前站点已关闭注册");
+        }
         if (userMapper.findByEmail(email) != null) {
             throw new BizException("该邮箱已被注册");
         }

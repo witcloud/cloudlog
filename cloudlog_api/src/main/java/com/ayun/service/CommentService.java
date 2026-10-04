@@ -120,8 +120,17 @@ public class CommentService {
         if (intervalSeconds > 0) {
             // 按该用户最近一条已落库的评论计时：回复也算，转待审的也算（被机审拒掉的没入库，不占间隔）
             LocalDateTime lastAt = commentMapper.findLastCreatedAtByUserId(user.getId());
-            if (lastAt != null && Duration.between(lastAt, LocalDateTime.now()).getSeconds() < intervalSeconds) {
-                throw new BizException("操作过于频繁，请稍后再试");
+            // 「现在」取业务时区：created_at 是 GMT+8 墙钟（db-design.md §1），用 JVM 默认时区的 now() 去减，
+            // 容器跑在 UTC 上就得到负数秒、恒小于间隔，频控变成永久拦截
+            if (lastAt != null) {
+                long elapsed = Duration.between(
+                                lastAt, LocalDateTime.now(ArticleService.BUSINESS_ZONE))
+                        .getSeconds();
+                if (elapsed < intervalSeconds) {
+                    // 把还剩几秒报出来：只说「稍后再试」等于让人凭感觉重试，而这个数系统本来就知道
+                    // （与登录锁定的 lockedMessage 同一口径）
+                    throw new BizException("评论发得太快，请 " + (intervalSeconds - elapsed) + " 秒后再试");
+                }
             }
         }
 
@@ -144,7 +153,7 @@ public class CommentService {
 
     /**
      * 回复目标要当场核得过：这条评论存在、与本次是同一篇文章、已过审、且自身是根评论。
-     * 这四条过去一条都不查，于是 parentId 可以指向别的文章的评论（前台按文章装载，那条回复永远显示不出来，
+     * 这四条缺一条，parentId 就可以指向别的文章的评论（前台按文章装载，那条回复永远显示不出来，
      * 只在库里留下一行跨文章的孤儿）、指向待审或被拒的评论（等于绕过人工审核把内容挂到别人评论下）、
      * 或指向一条回复（评论只有两级，读侧不装载第三级，写了也是不可见数据）
      */

@@ -216,6 +216,15 @@ router.beforeEach(async (to) => {
   if (to.meta.role && userStore.userInfo?.role !== to.meta.role) {
     return '/'
   }
+
+  // 已登录不该停在登录、注册、找回密码这三页：它们唯一的用途是把人送进登录态。
+  // 留着的代价不只是多一步——在登录页输错一次口令，旧版会连当前会话一起吃掉
+  const AUTH_ENTRIES = ['/login', '/register', '/forgot-password']
+  if (isLoggedIn && AUTH_ENTRIES.includes(to.path)) {
+    // redirect 只认站内绝对路径，与 LoginView 的 goAfterLogin 同一把尺子（//host 不算站内）
+    const back = to.query.redirect
+    return typeof back === 'string' && back.startsWith('/') && !back.startsWith('//') ? back : '/'
+  }
 })
 
 router.afterEach(() => {

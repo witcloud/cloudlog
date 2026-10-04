@@ -15,6 +15,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -43,6 +45,10 @@ class UserServiceTest {
 
     @Mock
     private TokenRevocationService tokenRevocationService;
+
+    /** 头像换下去之后那一步对象回收的协作者（business-model.md §3.3） */
+    @Mock
+    private ImageReclaimService imageReclaimService;
 
     @InjectMocks
     private UserService userService;
@@ -243,5 +249,35 @@ class UserServiceTest {
         verifyNoInteractions(passwordEncoder);
         verify(userMapper, never()).update(any());
         verify(tokenRevocationService, never()).revokeBeforeNow(anyString());
+    }
+
+    // ---- 头像绑定：换下去的旧对象交给回收（business-model.md §3.3）----
+
+    private static final String OLD_AVATAR = "http://127.0.0.1:9000/cloudlog/avatar/202609/old.jpeg";
+    private static final String NEW_AVATAR = "http://127.0.0.1:9000/cloudlog/avatar/202610/new.jpeg";
+
+    @Test
+    @DisplayName("换头像：绑定成功后把旧地址交给对象回收")
+    void updateAvatarReclaimsPreviousObject() {
+        when(userMapper.findByEmail(CURRENT_EMAIL)).thenReturn(
+                User.builder().id(1L).email(CURRENT_EMAIL).avatar(OLD_AVATAR).build());
+
+        userService.updateAvatar(CURRENT_EMAIL, NEW_AVATAR);
+
+        ArgumentCaptor<User> written = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).update(written.capture());
+        assertEquals(NEW_AVATAR, written.getValue().getAvatar());
+        verify(imageReclaimService).reclaim(List.of(OLD_AVATAR));
+    }
+
+    @Test
+    @DisplayName("首次设头像：没有旧对象，不产生回收")
+    void updateAvatarWithoutPreviousReclaimsNothing() {
+        when(userMapper.findByEmail(CURRENT_EMAIL)).thenReturn(
+                User.builder().id(1L).email(CURRENT_EMAIL).build());
+
+        userService.updateAvatar(CURRENT_EMAIL, NEW_AVATAR);
+
+        verify(imageReclaimService, never()).reclaim(any());
     }
 }

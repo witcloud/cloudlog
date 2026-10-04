@@ -30,9 +30,17 @@ export function login(data: LoginRequest) {
 /**
  * 登出：服务端把该账号的失效水位推到此刻，作废该账号全部在存 token。
  * 幂等：未登录（上下文匿名）调用同样返回成功
+ *
+ * token 由调用方显式传进来并塞进 header：store 在发这一枪之前已经把本地凭据清了
+ * （本地先清是对的——网络失败也不该把人留在"看起来已登录"的状态），
+ * 请求拦截器那时取不到 token，不补这一笔后端只会按匿名处理，水位推不上去、旧 token 照用到过期。
+ * silent：这一枪的失败不该再触发一次整站登出，也不该弹红字
  */
-export function logout() {
-  return request.post<unknown, Result<void>>('/auth/logout')
+export function logout(token?: string) {
+  return request.post<unknown, Result<void>>('/auth/logout', null, {
+    silent: true,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
 }
 
 /**

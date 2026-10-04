@@ -410,6 +410,7 @@ import type {
   CommentStatusCounts,
 } from '@/api/types/admin'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
+import { useUrlFilters } from '@/composables/useUrlFilters'
 import dayjs from 'dayjs'
 
 const loading = ref(false)
@@ -425,6 +426,8 @@ const query = reactive<AdminCommentQuery>({
   status: 'pending',
   keyword: null,
 })
+
+useUrlFilters(query)
 
 const tabs: { status: CommentStatus; label: string }[] = [
   { status: 'pending', label: '待审核' },
@@ -591,6 +594,9 @@ watch(
 )
 
 const submitWord = async () => {
+  // 回车也走这一条：loading 只挂在按钮上，连按 Enter 会打出多个同名请求，
+  // 唯一性校验存在竞态（与分类页那颗新增同口径，那边有这道闸门）
+  if (adding.value) return
   const word = newWord.value.trim()
   if (!word) {
     ElMessage.warning('请先输入要添加的词')

@@ -112,8 +112,11 @@
           <ul v-if="posts.length > 0" class="post-list">
             <li v-for="post in posts" :key="post.id" class="post-row">
               <div class="post-row__main">
-                <h3 class="post-row__title" @click="router.push(`/articles/${post.id}`)">
-                  {{ post.title || '无标题' }}
+                <h3 class="post-row__title">
+                  <!-- 标题自己是真链接：原先只有 h3 上的 @click，Tab 与中键都走不了 -->
+                  <RouterLink class="post-row__link" :to="`/articles/${post.id}`">
+                    {{ post.title || '无标题' }}
+                  </RouterLink>
                 </h3>
                 <p class="post-row__meta">
                   <!-- 已下线的文章只有本人看得到这一行：读者访问同一主页走公开列表，压根不含它 -->
@@ -199,8 +202,11 @@
           <ul v-if="liked.length > 0" class="post-list">
             <li v-for="post in liked" :key="post.id" class="post-row">
               <div class="post-row__main">
-                <h3 class="post-row__title" @click="router.push(`/articles/${post.id}`)">
-                  {{ post.title || '无标题' }}
+                <h3 class="post-row__title">
+                  <!-- 标题自己是真链接：原先只有 h3 上的 @click，Tab 与中键都走不了 -->
+                  <RouterLink class="post-row__link" :to="`/articles/${post.id}`">
+                    {{ post.title || '无标题' }}
+                  </RouterLink>
                 </h3>
                 <p class="post-row__meta">
                   <span>{{ post.category?.name || '未分类' }}</span>
@@ -271,6 +277,8 @@
               v-model="editForm.bio"
               type="textarea"
               :rows="3"
+              :maxlength="200"
+              show-word-limit
               placeholder="介绍一下你自己吧"
             />
           </el-form-item>
@@ -356,7 +364,9 @@ const rules = {
     },
   ],
   occupation: [{ max: 30, message: '职业长度不能超过 30 个字符', trigger: 'change' }],
-  bio: [{ max: 100, message: '长度不能超过 100 个字符', trigger: 'blur' }],
+  // 200 与后端 UserProfileUpdateDTO 的 @Size(max = 200) 同数：这里曾写 100，
+  // 等于前端把后端允许的一半额度自己砍掉，用户只会在 blur 后被一条看不懂的规则拦住
+  bio: [{ max: 200, message: '长度不能超过 200 个字符', trigger: 'blur' }],
 }
 
 // 我的文章：已发布 + 已下线（后者按 status 打徽标，只有本人能看到这一页）；草稿与定时归草稿箱。
@@ -924,6 +934,12 @@ const handleAvatarSuccess = (url: string) => {
 
   &:hover {
     color: var(--color-accent);
+  }
+
+  /* 标题现在是真链接，外观一个字不许变：墨色从 h3 继承，也不给下划线 */
+  .post-row__link {
+    color: inherit;
+    text-decoration: none;
   }
 }
 

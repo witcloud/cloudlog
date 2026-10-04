@@ -40,10 +40,14 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.TimeZone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -85,6 +89,10 @@ class ArticleServiceTest {
     /** 详情读路径上 visit_logs 那一条链路的协作者；本类不断言它的行为，只需要它存在且为空操作 */
     @Mock
     private VisitLogService visitLogService;
+
+    /** 删除级联末尾那一步对象回收的协作者；除回收用例本不关心它做了什么 */
+    @Mock
+    private ImageReclaimService imageReclaimService;
 
     @Mock
     private RedisTemplate<String, Object> redisTemplate;
@@ -215,6 +223,149 @@ class ArticleServiceTest {
         articleService.updatePost(3L, updateDTO);
 
         assertEquals(original, stored.getPublishedAt());
+    }
+
+    // ---- R13：定时文章未到点就被手工发布，published_at 以实际公开时刻为准（business-model.md §4.2 第 3 条）----
+
+    @Test
+    @DisplayName("更新文章：定时文章未到点就被手工发布时，未来的计划时刻覆写为当前时刻")
+    void updatePostRewritesFuturePlannedTimeWhenPublishedEarly() {
+        LocalDateTime planned = LocalDateTime.now().plusDays(2);
+        Post stored = Post.builder().id(3L).title("标题").content("正文").status("scheduled")
+                .publishedAt(planned).categoryId(1).build();
+        when(postMapper.findById(3L)).thenReturn(stored);
+        PostUpdateDTO updateDTO = new PostUpdateDTO();
+        updateDTO.setStatus("published");
+
+        LocalDateTime before = LocalDateTime.now();
+        articleService.updatePost(3L, updateDTO);
+
+        LocalDateTime publishedAt = stored.getPublishedAt();
+        assertNotEquals(planned, publishedAt, "未来计划时刻原样落库会让前台显示「发布于未来」");
+        assertFalse(publishedAt.isAfter(LocalDateTime.now()), "覆写的应是本次流转的时刻，不该仍在未来");
+        assertFalse(publishedAt.isBefore(before), "覆写的应是本次流转的时刻，不该早于本次调用");
+    }
+
+    @Test
+    @DisplayName("更新文章：计划时刻已到的定时文章手工发布时沿用计划时刻")
+    void updatePostKeepsPlannedTimeThatAlreadyPassed() {
+        LocalDateTime planned = LocalDateTime.now().minusHours(3);
+        Post stored = Post.builder().id(3L).title("标题").content("正文").status("scheduled")
+                .publishedAt(planned).categoryId(1).build();
+        when(postMapper.findById(3L)).thenReturn(stored);
+        PostUpdateDTO updateDTO = new PostUpdateDTO();
+        updateDTO.setStatus("published");
+
+        articleService.updatePost(3L, updateDTO);
+
+        assertEquals(planned, stored.getPublishedAt(), "计划时刻已是过去，它就是首次对外可见的时刻");
+    }
+
+    @Test
+    @DisplayName("更新文章：调度器已按计划时刻发布的行，后续保存不回写发布时间")
+    void updatePostDoesNotRewriteTimeAlreadyStoredByTheScheduler() {
+        // 调度器到点只翻 status、published_at 留的是计划时刻（§4.2 状态机），这一行此后不该再动
+        LocalDateTime planned = LocalDateTime.now().minusMinutes(5);
+        Post stored = Post.builder().id(3L).title("标题").content("正文").status("published")
+                .publishedAt(planned).categoryId(1).build();
+        when(postMapper.findById(3L)).thenReturn(stored);
+        PostUpdateDTO updateDTO = new PostUpdateDTO();
+        updateDTO.setStatus("published");
+
+        articleService.updatePost(3L, updateDTO);
+
+        assertEquals(planned, stored.getPublishedAt(), "覆写只认「从 scheduled 手工流转到 published」这一侧");
+    }
+
+    // ---- R14：写库的时刻锚业务时区，不吃 JVM 默认时区（db-design.md §1「服务端 GMT+8，不做 UTC 存储」）----
+
+    /**
+     * 把 JVM 默认时区临时钉成 UTC 再跑：容器不以 +08:00 起跑时，写入侧的墙钟差 8 小时就靠这个差异暴露。
+     * 改的是全局状态，finally 必须还原，否则同一 JVM 里后续用例跟着错位
+     */
+    private static void underUtcJvmClock(Runnable action) {
+        TimeZone original = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+        try {
+            action.run();
+        } finally {
+            TimeZone.setDefault(original);
+        }
+    }
+
+    /**
+     * 写入的时刻应为北京墙钟：与同一线程上 UTC 基的 JVM 默认时钟差整 8 小时（留 1 分钟取整余量）。
+     * 不拿 BUSINESS_ZONE 当基准，否则实现改回 JVM 默认时区也测不出来
+     */
+    private static void assertBeijingWallClock(String field, LocalDateTime written, LocalDateTime utcBasis) {
+        long gapMinutes = Duration.between(utcBasis, written).toMinutes();
+        assertTrue(gapMinutes >= 479 && gapMinutes <= 481,
+                field + " 写的不是北京墙钟：与 UTC 基差 " + gapMinutes + " 分钟");
+    }
+
+    @Test
+    @DisplayName("创建文章：JVM 跑 UTC 时立即发布写的仍是北京墙钟")
+    void createPostWritesPublishedAtInBusinessZone() {
+        loginAs(7L, "author@ayun.com");
+        Post post = Post.builder().title("标题").content("正文").status("published").categoryId(1).build();
+        doReturn(post).when(postConverter).toEntity(any(PostCreateDTO.class));
+        PostCreateDTO createDTO = new PostCreateDTO();
+        createDTO.setTitle("标题");
+
+        underUtcJvmClock(() -> {
+            LocalDateTime utcBasis = LocalDateTime.now();
+            articleService.createPost(createDTO);
+            assertBeijingWallClock("published_at", post.getPublishedAt(), utcBasis);
+        });
+    }
+
+    @Test
+    @DisplayName("更新文章：JVM 跑 UTC 时补写的发布时间仍是北京墙钟")
+    void updatePostBackfillsPublishedAtInBusinessZone() {
+        Post stored = Post.builder().id(3L).title("标题").content("正文").status("draft").categoryId(1).build();
+        when(postMapper.findById(3L)).thenReturn(stored);
+        PostUpdateDTO updateDTO = new PostUpdateDTO();
+        updateDTO.setStatus("published");
+
+        underUtcJvmClock(() -> {
+            LocalDateTime utcBasis = LocalDateTime.now();
+            articleService.updatePost(3L, updateDTO);
+            assertBeijingWallClock("published_at", stored.getPublishedAt(), utcBasis);
+        });
+    }
+
+    @Test
+    @DisplayName("更新文章：JVM 跑 UTC 时提前手工发布覆写的仍是北京墙钟")
+    void updatePostRewritesEarlyPublishInBusinessZone() {
+        // 计划时刻相对业务时钟在未来：定时文章未到点就被手工发布，走覆写那一条
+        Post stored = Post.builder().id(3L).title("标题").content("正文").status("scheduled")
+                .publishedAt(LocalDateTime.now().plusDays(2)).categoryId(1).build();
+        when(postMapper.findById(3L)).thenReturn(stored);
+        PostUpdateDTO updateDTO = new PostUpdateDTO();
+        updateDTO.setStatus("published");
+
+        underUtcJvmClock(() -> {
+            LocalDateTime utcBasis = LocalDateTime.now();
+            articleService.updatePost(3L, updateDTO);
+            assertBeijingWallClock("published_at", stored.getPublishedAt(), utcBasis);
+        });
+    }
+
+    @Test
+    @DisplayName("更新文章：JVM 跑 UTC 时下架留痕写的仍是北京墙钟")
+    void updatePostStampsOfflineTraceInBusinessZone() {
+        loginAs(7L, "author@ayun.com");
+        Post stored = Post.builder().id(3L).title("标题").content("正文").status("published")
+                .publishedAt(LocalDateTime.of(2026, 9, 1, 10, 0)).categoryId(1).build();
+        when(postMapper.findById(3L)).thenReturn(stored);
+        PostUpdateDTO updateDTO = new PostUpdateDTO();
+        updateDTO.setStatus("offline");
+
+        underUtcJvmClock(() -> {
+            LocalDateTime utcBasis = LocalDateTime.now();
+            articleService.updatePost(3L, updateDTO);
+            assertBeijingWallClock("offlined_at", stored.getOfflinedAt(), utcBasis);
+        });
     }
 
     // ---- R10：摘要是正文的服务端派生物，作者侧没有输入口（business-model.md §2.3）----
@@ -523,6 +674,7 @@ class ArticleServiceTest {
     @DisplayName("删除文章：按 post_tags → likes → comments → posts 的顺序清理")
     void deletePostClearsChildRowsBeforeMainRow() {
         when(postMapper.findById(1L)).thenReturn(Post.builder().id(1L).status("published").build());
+        when(postMapper.findCoverAndContent(1L)).thenReturn(Post.builder().id(1L).build());
 
         articleService.deletePost(1L);
 
@@ -531,6 +683,24 @@ class ArticleServiceTest {
         order.verify(likeMapper).deleteByPostId(1L);
         order.verify(commentMapper).deleteByPostId(1L);
         order.verify(postMapper).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("删除文章：封面与正文引用的图都交给对象回收（business-model.md §3.3）")
+    void deletePostHandsCoverAndBodyImagesToReclaim() {
+        String cover = "http://127.0.0.1:9000/cloudlog/post/cover/202610/cccc.jpg";
+        String inline = "http://127.0.0.1:9000/cloudlog/post/content/202610/iiii.png";
+        when(postMapper.findById(1L)).thenReturn(Post.builder().id(1L).status("published").build());
+        when(postMapper.findCoverAndContent(1L)).thenReturn(Post.builder()
+                .id(1L)
+                .cover(cover)
+                .content("正文\n\n![](" + inline + ")\n\n结尾")
+                .build());
+
+        articleService.deletePost(1L);
+
+        // 单测里没有事务，afterCommit 按「无提交点可等」直接交出去；提交时机由集成验证与 ImageReclaimServiceTest 钉住
+        verify(imageReclaimService).reclaim(List.of(cover, inline));
     }
 
     @Test
@@ -553,6 +723,7 @@ class ArticleServiceTest {
         loginAs(7L, "author@ayun.com");
         when(postMapper.findOwnedDraft(9L, 7L))
                 .thenReturn(Post.builder().id(9L).status("scheduled").authorId(7L).build());
+        when(postMapper.findCoverAndContent(9L)).thenReturn(Post.builder().id(9L).build());
 
         articleService.deleteDraft(9L);
 
@@ -581,6 +752,8 @@ class ArticleServiceTest {
     void clearDraftsCascadesEachDraft() {
         loginAs(7L, "author@ayun.com");
         when(postMapper.findDraftIdsByAuthor(7L)).thenReturn(List.of(9L, 10L));
+        when(postMapper.findCoverAndContent(9L)).thenReturn(Post.builder().id(9L).build());
+        when(postMapper.findCoverAndContent(10L)).thenReturn(Post.builder().id(10L).build());
 
         articleService.clearDrafts();
 
@@ -993,7 +1166,7 @@ class ArticleServiceTest {
         verify(postMapper).findAllBrief(null, null, null, null, "popular");
     }
 
-    // ---- 详情页三个 SEO 值的合成（business-model.md §2.10；2026-10-03 起库里没有可填的 SEO 表）----
+    // ---- 详情页三个 SEO 值的合成（business-model.md §2.10；库里没有可填的 SEO 表）----
 
     @Test
     @DisplayName("详情：标题拼站点名、描述取摘要、关键词取标签名")

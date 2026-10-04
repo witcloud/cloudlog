@@ -43,7 +43,7 @@ public class LogRetentionService {
     }
 
     private void purgeVisitLogs() {
-        LocalDateTime threshold = LocalDateTime.now().minusDays(VISIT_LOG_RETENTION_DAYS);
+        LocalDateTime threshold = LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusDays(VISIT_LOG_RETENTION_DAYS);
         try {
             int removed = purgeInBatches(visitLogMapper::deleteCreatedBefore, threshold);
             if (removed > 0) {
@@ -55,7 +55,7 @@ public class LogRetentionService {
     }
 
     private void purgeLoginLogs() {
-        LocalDateTime threshold = LocalDateTime.now().minusDays(LOGIN_LOG_RETENTION_DAYS);
+        LocalDateTime threshold = LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusDays(LOGIN_LOG_RETENTION_DAYS);
         try {
             int removed = purgeInBatches(loginLogMapper::deleteCreatedBefore, threshold);
             if (removed > 0) {

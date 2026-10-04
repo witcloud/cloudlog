@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 改资料的用户名规则：注册侧限 2-30 位并带字符白名单，改资料侧过去是 2-20 位且什么都不限，
- * 同一个字段两套口径。两处现在都引 {@link UsernameRules}，这里钉住「同一个名字在两个入口判定一致」
+ * 改资料的用户名规则：注册与改资料两侧统一限 2-30 位并带字符白名单（{@link UsernameRules}），
+ * 这里钉住「同一个名字在两个入口判定一致」
  */
 class UserProfileUpdateValidationTest {
 

@@ -94,6 +94,36 @@ class SeoPublicServiceTest {
     }
 
     @Test
+    @DisplayName("sitemap：JVM 跑 UTC 时 lastmod 申报的仍是 +08:00，而不是把北京墙钟当成 UTC 时刻")
+    void sitemapLastmodAnchorsToBusinessZone() {
+        useConfiguredSite();
+        when(postMapper.findAllPublishedForSitemap()).thenReturn(List.of(article(11L, "甲篇", "甲的摘要")));
+
+        JvmClockProbe.underUtc(() -> {
+            String xml = seoPublicService.sitemap();
+            // 列值 12:00 是北京时间；偏移报成 Z 就等于向爬虫申报 20:00 这个瞬时，整份 sitemap 早 8 小时
+            assertTrue(xml.contains("<lastmod>2026-10-01T12:00:00+08:00</lastmod>"),
+                    "lastmod 的偏移须与列值口径同基，实际是：" + xml);
+        });
+    }
+
+    @Test
+    @DisplayName("feed：JVM 跑 UTC 时 pubDate 换算到 GMT 报的仍是同一个瞬时")
+    void feedPubDateAnchorsToBusinessZone() {
+        useConfiguredSite();
+        when(settingsService.getSiteName()).thenReturn("CloudLog");
+        when(settingsService.getAboutContent()).thenReturn(AboutContentVO.builder().lead("导语").build());
+        when(postMapper.findLatestPublishedForFeed(20)).thenReturn(List.of(article(21L, "一篇", "一段摘要")));
+
+        JvmClockProbe.underUtc(() -> {
+            String xml = seoPublicService.feed();
+            // 09:00 北京 = 01:00 GMT；按运行时时区读就会把 09:00 直接当成 GMT
+            assertTrue(xml.contains("<pubDate>Thu, 1 Oct 2026 01:00:00 GMT</pubDate>"),
+                    "pubDate 须由北京墙钟换算到 GMT，实际是：" + xml);
+        });
+    }
+
+    @Test
     @DisplayName("robots：放行根路径、禁抓后台与账号簇，末尾申报站点地图地址")
     void robotsAllowsRootAndDisallowsPrivateAreas() {
         useConfiguredSite();

@@ -83,8 +83,9 @@
           </el-table-column>
           <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
+              <button class="row-action" @click="openDetail(row)">查看</button>
+              <!-- 详情对所有行开放；禁用/启用仍只给普通用户，管理员不该被禁用 -->
               <template v-if="row.role !== 'admin'">
-                <button class="row-action" @click="openDetail(row)">查看</button>
                 <button
                   v-if="row.status === 1"
                   class="row-action row-action--danger"
@@ -96,7 +97,6 @@
                   启用
                 </button>
               </template>
-              <span v-else class="cell-muted">—</span>
             </template>
           </el-table-column>
 
@@ -136,9 +136,9 @@
             <dt>身份</dt>
             <dd>{{ detail.role === 'admin' ? '管理员' : '普通用户' }}</dd>
           </div>
-          <div v-if="detail.occupation">
+          <div>
             <dt>职业</dt>
-            <dd>{{ detail.occupation }}</dd>
+            <dd>{{ detail.occupation || '未填写' }}</dd>
           </div>
           <div>
             <dt>状态</dt>
@@ -172,6 +172,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAdminUsers, updateUserStatus } from '@/api/admin'
 import type { AdminUserItem, UserStatus } from '@/api/types/admin'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
+import { useUrlFilters } from '@/composables/useUrlFilters'
 import dayjs from 'dayjs'
 
 const loading = ref(false)
@@ -186,6 +187,8 @@ const query = reactive({
   keyword: null as string | null,
   status: null as number | null,
 })
+
+useUrlFilters(query)
 
 const hasFilter = computed(() => !!(query.keyword || query.status !== null))
 

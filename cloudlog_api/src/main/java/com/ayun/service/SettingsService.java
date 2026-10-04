@@ -252,6 +252,11 @@ public class SettingsService {
                 .siteName(getSiteName())
                 .icpNumber(getString(KEY_ICP_NUMBER, DEFAULT_ICP_NUMBER))
                 .commentMaxLength(getInt(KEY_COMMENT_MAX_LENGTH, DEFAULT_COMMENT_MAX_LENGTH))
+                // 间隔秒数一并下发：只在前台留一个能点第二次的按钮，等撞上报错才说明有冷却，
+                // 等于把服务端已有的规则藏起来让人试
+                .commentIntervalSeconds(
+                        getInt(KEY_COMMENT_INTERVAL_SECONDS, DEFAULT_COMMENT_INTERVAL_SECONDS))
+                .registrationEnabled(getBoolean(KEY_REGISTRATION_ENABLED, true))
                 .build();
     }
 

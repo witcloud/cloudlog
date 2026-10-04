@@ -8,7 +8,7 @@
             <li>
               <button
                 class="category-item"
-                :class="{ 'is-active': !currentCategoryId }"
+                :class="{ 'is-active': !currentCategoryId && !tagFilterActive }"
                 @click="handleCategorySelect(undefined)"
               >
                 <span class="category-item__name">全部文章</span>
@@ -41,7 +41,7 @@
           <div class="category-tabs__scroll">
             <button
               class="category-tabs__item"
-              :class="{ 'is-active': !currentCategoryId }"
+              :class="{ 'is-active': !currentCategoryId && !tagFilterActive }"
               @click="handleCategorySelect(undefined)"
             >
               全部
@@ -69,14 +69,16 @@
         </div>
 
         <!-- 排序 tab：掘金式下划线。工具条自成一块面板，不套进 .article-area（该框自带 --space-md 内衬，套进去就成了两倍） -->
-        <div class="sort-tabs" role="tablist" aria-label="文章排序">
+        <!-- 两个按钮是一组筛选，不是页签：tablist 要求配套的 tabpanel 与方向键，
+             这里两样都没有，声明了反而让读屏报出「1/2 页签」却跳不到任何面板。
+             选中态改走 aria-current，与窄屏那条分类横滑条同一套 -->
+        <div class="sort-tabs" role="group" aria-label="文章排序">
           <button
             v-for="tab in sortTabs"
             :key="tab.key"
             class="sort-tabs__item"
             :class="{ 'is-active': currentSort === tab.key }"
-            role="tab"
-            :aria-selected="currentSort === tab.key"
+            :aria-current="currentSort === tab.key ? 'true' : undefined"
             @click="handleSortSelect(tab.key)"
           >
             {{ tab.label }}
@@ -96,7 +98,13 @@
             <ArticleCard v-for="article in normalArticles" :key="article.id" :article="article" />
           </div>
 
-          <div v-if="!loading && articles.length === 0" class="empty-state">
+          <div v-if="!loading && articles.length === 0 && loadFailed" class="empty-state">
+            <p class="empty-state__title">列表没有加载出来。</p>
+            <p class="empty-state__hint">服务没有正常响应。文章还在，是这一次请求没成。</p>
+            <button class="empty-state__action" @click="fetchArticles()">重试</button>
+          </div>
+
+          <div v-else-if="!loading && articles.length === 0" class="empty-state">
             <p class="empty-state__title">未找到相关文章。</p>
             <p class="empty-state__hint">换个分类或关键词，也许能找到想读的内容。</p>
             <button class="empty-state__action" @click="clearFilter">查看全部文章</button>
@@ -104,6 +112,15 @@
 
           <div ref="sentinelRef" class="load-sentinel" aria-live="polite">
             <span v-if="loadingMore">加载中…</span>
+            <!-- 追加失败时列表还在手上，不能装作「没有更多了」：那一页根本没回来 -->
+            <button
+              v-else-if="loadFailed && articles.length"
+              type="button"
+              class="load-sentinel__retry"
+              @click="loadMore"
+            >
+              这一页没加载出来，点击重试
+            </button>
             <span v-else-if="total > pageSize && !hasMore">没有更多了</span>
           </div>
         </div>
@@ -164,6 +181,9 @@ const articles = ref<Article[]>([])
 const categories = ref<Category[]>([])
 const loading = ref(false)
 const loadingMore = ref(false)
+/** 列表拉失败要和「拉到了但没内容」分开说：只 console.error 的话，
+ *  后端一抽，屏幕上就是「未找到相关文章」——一句听起来像事实的谎话 */
+const loadFailed = ref(false)
 const sentinelRef = ref<HTMLElement>()
 
 /** 统计卡三项与左栏分类计数同源：一次 /site/stats 取回全部真值 */
@@ -205,8 +225,20 @@ const filterInfo = computed(() => {
   if (route.query.tag && resolvedTagId.value != null) {
     return { type: '标签', value: route.query.tag as string }
   }
+  // ?tagId= 是文章卡与详情页上那些标签链接的形态。名字从已加载的列表里反查（列表就是这一标签下的文章），
+  // 反查不到也要承认在过滤——不显示横幅时屏幕上是一片「全部文章」，而它不是
+  if (route.query.tagId) {
+    const id = Number(route.query.tagId)
+    const named = articles.value
+      .flatMap((article) => article.tags ?? [])
+      .find((tag) => tag.id === id)?.name
+    return { type: '标签', value: named || '按标签筛选' }
+  }
   return null
 })
+
+/** 标签筛选是否生效。左栏与窄屏横滑条的「全部」选中态都要让给它，否则筛着标签还亮着「全部文章」 */
+const tagFilterActive = computed(() => filterInfo.value?.type === '标签')
 
 /** ?tag=（标签名）到 tagId 的解析结果：undefined=解析中，null=无此标签，number=命中 */
 const resolvedTagId = ref<number | null>()
@@ -320,6 +352,7 @@ const fetchArticles = async (append = false): Promise<boolean> => {
   const key = lastFetchKey.value
   if (append) loadingMore.value = true
   else loading.value = true
+  loadFailed.value = false
   try {
     const params: ArticleListParams = {
       page: page.value,
@@ -339,6 +372,7 @@ const fetchArticles = async (append = false): Promise<boolean> => {
     return true
   } catch (error) {
     console.error('Failed to fetch articles:', error)
+    loadFailed.value = true
     return false
   } finally {
     loading.value = false
@@ -776,6 +810,16 @@ watch(fetchKey, (key, prevKey) => {
   font-size: var(--text-sm);
   color: var(--color-ink-4);
   text-align: center;
+
+  /* 追加失败时的那颗重试：沿用这一行的文字档，不自带控件外观 */
+  &__retry {
+    border: 0;
+    padding: 0;
+    background: none;
+    font: inherit;
+    color: var(--color-accent-ink);
+    cursor: pointer;
+  }
 
   /* 首屏与空态都不需要这行留白撑高 */
   &:empty {

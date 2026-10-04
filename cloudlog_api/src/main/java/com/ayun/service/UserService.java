@@ -13,6 +13,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 /**
  * 用户业务逻辑类
  */
@@ -24,6 +26,7 @@ public class UserService {
     private final VerificationCodeService verificationCodeService;
     private final PasswordEncoder passwordEncoder;
     private final TokenRevocationService tokenRevocationService;
+    private final ImageReclaimService imageReclaimService;
 
     /**
      * 根据邮箱查询用户
@@ -58,7 +61,8 @@ public class UserService {
 
     /**
      * 把已上传到对象存储的头像地址绑定到当前登录用户。
-     * 头像上传的写库步骤原先长在 controller 里，这里收回服务层，身份仍只取安全上下文。
+     * 写库步骤收在服务层，身份只取安全上下文，controller 只做上传与转交。
+     * 换下去的旧头像对象在提交成功后异步回收（business-model.md §3.3）
      * @param email 当前用户邮箱
      * @param avatarUrl 头像完整访问地址
      */
@@ -68,8 +72,13 @@ public class UserService {
         if (user == null) {
             throw new NotFoundException("未找到当前用户信息");
         }
+        String previous = user.getAvatar();
         user.setAvatar(avatarUrl);
         userMapper.update(user);
+
+        // 从未上传过头像时没有旧对象可回收
+        List<String> replaced = previous == null || previous.isBlank() ? List.of() : List.of(previous);
+        ImageReclaimService.afterCommit(replaced, imageReclaimService::reclaim);
     }
 
     /**

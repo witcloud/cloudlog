@@ -22,7 +22,10 @@ const coverUrl = computed(() => formatMinioUrl(props.article.cover))
   <article class="article-card" @click="goToDetail">
     <div class="article-card__body">
       <h2 class="article-card__title">
-        <span v-if="article.isTop" class="article-card__pin">置顶</span>{{ article.title }}
+        <!-- 真链接：整卡 @click 只有鼠标能走，Tab 到不了这张卡，中键/Ctrl+点击也开不了新标签 -->
+        <RouterLink class="article-card__link" :to="`/articles/${article.id}`">
+          <span v-if="article.isTop" class="article-card__pin">置顶</span>{{ article.title }}
+        </RouterLink>
       </h2>
       <p class="article-card__excerpt">{{ article.excerpt }}</p>
       <p class="article-card__meta">
@@ -107,6 +110,13 @@ const coverUrl = computed(() => formatMinioUrl(props.article.cover))
 
 .article-card:hover .article-card__title {
   color: var(--color-accent);
+}
+
+/* 标题现在是一个真链接，但外观一个字都不许变：颜色跟着 h2 走（悬停变橙那条规则靠的就是继承），
+   也不给下划线——列表里出现链接装饰会把这一行的墨色权重抬高 */
+.article-card__link {
+  color: inherit;
+  text-decoration: none;
 }
 
 /* 作者名与标签是这一行之内的独立落点：指针落在它们上只亮它们自己。

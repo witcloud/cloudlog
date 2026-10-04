@@ -20,7 +20,11 @@
 
         <el-form-item label="验证码" prop="code">
           <div class="auth-code-input">
-            <el-input v-model="resetForm.code" placeholder="请输入 6 位验证码" />
+            <el-input
+              v-model="resetForm.code"
+              maxlength="6"
+              placeholder="请输入 6 位验证码（5 分钟内有效）"
+            />
             <el-button
               type="primary"
               plain
@@ -65,24 +69,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onUnmounted } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { sendResetCode, resetPassword } from '@/api/auth'
+import { useResendCooldown } from '@/composables/useResendCooldown'
 import SiteLogo from '@/components/SiteLogo.vue'
 
 const router = useRouter()
 const loading = ref(false)
 const sendCodeLoading = ref(false)
-const countdown = ref(0)
 const resetFormRef = ref<FormInstance>()
-
-// 倒计时定时器挂组件外层引用：切路由时组件卸载，interval 得跟着停，不能空转到 0
-let countdownTimer: ReturnType<typeof setInterval> | null = null
-onUnmounted(() => {
-  if (countdownTimer) clearInterval(countdownTimer)
-})
 
 const resetForm = reactive({
   email: '',
@@ -90,6 +88,18 @@ const resetForm = reactive({
   newPassword: '',
   confirmPassword: '',
 })
+
+/** 重发窗口按邮箱记在 localStorage：刷新一次就把 60 秒清零，只会让人再去撞一次「发送过于频繁」 */
+const { countdown, arm: armResend } = useResendCooldown(() => resetForm.email)
+
+/** 新密码一改，确认位那条不一致就得重算：它原先只在自身 blur 时触发 */
+watch(
+  () => resetForm.newPassword,
+  () => {
+    if (!resetForm.confirmPassword) return
+    resetFormRef.value?.validateField('confirmPassword').catch(() => {})
+  },
+)
 
 const validatePass2 = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value === '') {
@@ -108,7 +118,8 @@ const rules = {
   ],
   code: [
     { required: true, message: '请输入验证码', trigger: 'blur' },
-    { len: 6, message: '验证码长度为 6 位', trigger: 'blur' },
+    // 六位数字：填进字母只会得到后端那句「验证码错误或已过期」，还白吃一次错误额度
+    { pattern: /^\d{6}$/, message: '验证码是 6 位数字', trigger: 'blur' },
   ],
   // 与后端 PasswordResetRequest 同档：8 是强度下限，72 是 BCrypt 的截断边界
   newPassword: [
@@ -134,15 +145,7 @@ const handleSendCode = async () => {
     await sendResetCode(resetForm.email)
     // 中性话术：后端对未注册邮箱静默跳过（防账号枚举），响应一律成功，这里不能替后端断言「已发送」
     ElMessage.success('若该邮箱已注册，验证码将发送至您的邮箱')
-    countdown.value = 60
-    if (countdownTimer) clearInterval(countdownTimer)
-    countdownTimer = setInterval(() => {
-      countdown.value--
-      if (countdown.value <= 0 && countdownTimer) {
-        clearInterval(countdownTimer)
-        countdownTimer = null
-      }
-    }, 1000)
+    armResend()
   } catch {
     // Error handled by interceptor
   } finally {
@@ -164,7 +167,8 @@ const handleSubmit = async () => {
         newPassword: resetForm.newPassword,
       })
       ElMessage.success('密码已重置，请用新密码登录')
-      router.push('/login')
+      // 带上刚重置的邮箱：登录页预填的是「上次登录过的账号」，不是这个正要登的
+      router.push({ path: '/login', query: { email: resetForm.email } })
     } catch {
       // Error handled by interceptor
     } finally {

@@ -24,4 +24,10 @@ public class SiteInfoVO {
 
     @Schema(description = "评论字数上限，0 表示不限制；前台评论框据此限制输入，服务端仍独立校验", example = "500")
     private Integer commentMaxLength;
+
+    @Schema(description = "同一用户两次发评论的最小间隔秒数，0 表示不限制；前台据此置灰提交按钮", example = "60")
+    private Integer commentIntervalSeconds;
+
+    @Schema(description = "开放注册开关：关闭时前台隐藏注册入口与发码按钮，而不是让人发完验证码才被拒", example = "true")
+    private Boolean registrationEnabled;
 }

@@ -133,7 +133,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { uploadArticleImage } from '@/api/article'
-import { UPLOAD_LIMITS } from '@/config/upload'
+import { UPLOAD_LIMITS, ACCEPTED_IMAGE_TYPES, ACCEPTED_IMAGE_HINT } from '@/config/upload'
 import { formatMinioUrl } from '@/config'
 
 const props = defineProps<{ modelValue: boolean }>()
@@ -141,7 +141,6 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void; (e: 'conf
 
 // 与封面/头像共用同一份上限口径（config/upload.ts）
 const MAX_SIZE = UPLOAD_LIMITS.articleImage
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 
 const tab = ref<'upload' | 'link'>('upload')
 const stage = ref<'idle' | 'uploading' | 'success' | 'error'>('idle')
@@ -165,9 +164,28 @@ const linkError = computed(() => {
   return ''
 })
 
-const close = () => emit('update:modelValue', false)
+const close = () => {
+  voidUpload()
+  emit('update:modelValue', false)
+}
+
+/**
+ * 在途上传的作废通道。
+ * 关弹窗不撤请求的话：对象照样落桶、日额度照样扣，而屏幕上已经看不见这一枪；
+ * 更糟的是重开弹窗后回来的响应把 stage 改回 success，点确认插进去的是上一张图。
+ * 所以既 abort 真请求，也用序号挡住任何迟到的回写。
+ */
+let uploadCtrl: AbortController | null = null
+let uploadSeq = 0
+
+const voidUpload = () => {
+  uploadSeq += 1
+  uploadCtrl?.abort()
+  uploadCtrl = null
+}
 
 const resetUpload = () => {
+  voidUpload()
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = ''
@@ -188,9 +206,9 @@ const fileSizeOf = (file: File) => {
 
 /** 校验 + 上传，复用文章图片上传接口 */
 const uploadFile = async (file: File) => {
-  if (!ALLOWED_TYPES.includes(file.type)) {
+  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
     stage.value = 'error'
-    errorText.value = '不支持的图片格式，请选择 jpg、jpeg、png、gif 或 webp 图片'
+    errorText.value = `不支持的图片格式，请选择 ${ACCEPTED_IMAGE_HINT} 图片`
     return
   }
   if (file.size > MAX_SIZE) {
@@ -206,8 +224,15 @@ const uploadFile = async (file: File) => {
   previewUrl.value = URL.createObjectURL(file)
   stage.value = 'uploading'
 
+  // 换文件重传时先撤掉上一发，并领一个本轮序号
+  voidUpload()
+  const ctrl = new AbortController()
+  uploadCtrl = ctrl
+  const seq = uploadSeq
+
   try {
-    const res = await uploadArticleImage(file)
+    const res = await uploadArticleImage(file, ctrl.signal)
+    if (seq !== uploadSeq) return
     if (res.code === 200) {
       uploadedUrl.value = formatMinioUrl(res.data)
       stage.value = 'success'
@@ -216,8 +241,12 @@ const uploadFile = async (file: File) => {
       errorText.value = res.message || '上传失败，请重试'
     }
   } catch {
+    // 已被作废（关弹窗/换了文件）：这一发的结果不作数，也不留错误态
+    if (seq !== uploadSeq) return
     stage.value = 'error'
     errorText.value = '上传失败，请重试'
+  } finally {
+    if (uploadCtrl === ctrl) uploadCtrl = null
   }
 }
 

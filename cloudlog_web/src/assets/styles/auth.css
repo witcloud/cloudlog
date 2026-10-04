@@ -86,6 +86,13 @@
   text-underline-offset: 0.25em;
 }
 
+/* 注册关闭时顶掉那颗切换的说明句：不是链接，不给强调色 */
+.auth-foot__closed {
+  margin-left: var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--color-ink-4);
+}
+
 /* 表单区内的纯文本链接（「找回密码？」），与页脚切换同一档 */
 .auth-link {
   font-size: var(--text-sm);

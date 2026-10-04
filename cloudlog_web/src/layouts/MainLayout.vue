@@ -157,7 +157,10 @@
             </template>
             <template v-else>
               <RouterLink to="/login" class="auth-link">登录</RouterLink>
-              <RouterLink to="/register" class="btn-outline">注册</RouterLink>
+              <!-- 后台关掉注册就不摆这颗：点进去只会让人填完邮箱收完验证码才被拒 -->
+              <RouterLink v-if="siteStore.registrationEnabled" to="/register" class="btn-outline">
+                注册
+              </RouterLink>
             </template>
           </div>
         </div>
@@ -170,7 +173,7 @@
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in" @after-leave="onAfterLeave">
             <keep-alive include="HomeView">
-              <component :is="Component" />
+              <component :is="Component" :key="viewKey" />
             </keep-alive>
           </transition>
         </router-view>
@@ -234,6 +237,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useSiteStore } from '@/stores/site'
 import { ElMessage } from 'element-plus'
 import { formatMinioUrl, defaultAvatarUrl } from '@/config'
 import { useTheme } from '@/composables/useTheme'
@@ -245,6 +249,7 @@ import SiteLogo from '@/components/SiteLogo.vue'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const siteStore = useSiteStore()
 const { isDark, toggle } = useTheme()
 
 const searchQuery = ref('')
@@ -293,6 +298,16 @@ watch(
     }
   },
   { immediate: true },
+)
+
+/**
+ * 换 id 要真的换页。同路由换参数时组件实例被复用，<transition> 不走 leave/enter，
+ * 挂在 after-leave 上的滚动恢复就永远不触发——作者主页的「关注中」点进另一位，
+ * 屏幕还停在上一个人的页面中段，下一次导航又莫名跳一下。
+ * 编辑器是例外：它的新建回填 id 也走同一条路由，重挂会把 vditor 与光标一起毁掉。
+ */
+const viewKey = computed(() =>
+  route.name === 'ArticleEditor' ? 'ArticleEditor' : `${String(route.name)}:${route.params.id ?? ''}`,
 )
 
 /** 旧页面移除（过渡 after-leave）后恢复滚动：前进回顶、后退回到离开时位置；顶栏同步复位 */
@@ -376,6 +391,9 @@ const handleLogout = () => {
 }
 
 .wordmark {
+  /* flex 而非行内盒：logo 是 atomic inline-flex，在 1.75 行盒里按基线锚定，整幅会高出导航 3px */
+  display: flex;
+  align-items: center;
   font-size: var(--text-base);
   color: var(--color-ink);
   white-space: nowrap;
@@ -593,6 +611,28 @@ const handleLogout = () => {
 @media (max-width: 37.5rem) {
   .header-account {
     display: none;
+  }
+
+  /* 让出来的空间给这一个框，但不许反过来压导航簇：给框定死 56vw 时，
+     左簇被挤到汉堡宽度归零、站点名只剩两个字母。改成左簇不缩、右簇吃剩余 */
+  .site-header__left {
+    flex-shrink: 0;
+  }
+
+  .search-box__input {
+    height: 2.5rem;
+  }
+
+  .search-box__clear {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  /* 汉堡与主题钮：2rem 的落点在拇指上不算稳，这一档提到 40px */
+  .icon-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    flex-shrink: 0;
   }
 }
 

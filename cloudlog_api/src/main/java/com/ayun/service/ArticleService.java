@@ -77,6 +77,9 @@ public class ArticleService {
     @Autowired
     private IpUtils ipUtils;
 
+    @Autowired
+    private ImageReclaimService imageReclaimService;
+
     private static final String VIEW_DEDUP_KEY = "article:view_dedup:";
 
     /** 阅读去重窗口（秒）：同一访问者在窗口内反复访问同一文章只计一次 */
@@ -95,15 +98,27 @@ public class ArticleService {
     private static final List<String> ALLOWED_STATUS = List.of("draft", "published", "scheduled", "offline");
 
     /**
-     * 业务时区：计划时刻、发布时间的判定统一按北京墙钟。jackson 的 time-zone 与 JDBC 的
-     * serverTimezone 都锚在 GMT+8（application.yml），JVM 时区不同也不会错位
+     * 业务时区：计划时刻、发布时间、下架留痕的**写入与判定**统一按北京墙钟。
+     * 另一端也在同一个基上：连接串用 connectionTimeZone=+08:00 + forceConnectionTimeZoneToSession=true
+     * 把 MySQL 会话显式钉成 +08:00，所以 NOW() 与列的 DEFAULT / ON UPDATE 写的也是北京墙钟
+     * （时刻列是 TIMESTAMP，MySQL 按会话时区换算读写；口径与验证见 DataSourceTimeZoneTest 与 db-design.md §1）
      */
     static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
 
     /**
+     * 写库与比对用的「当前时刻」：只认业务时区，不走 JVM 默认时区。
+     * 裸 now() 把「现在几点」交给部署环境决定——容器以 UTC 起跑时，写进 TIMESTAMP 列的墙钟与库里
+     * 由 DEFAULT / ON UPDATE 生成的 created_at、updated_at 就分成两套基，同一行里并存；
+     * 读侧前台「发布于」与热度衰减（§3.2「排序参数」）跟着错位，而列值本身看不出异常
+     */
+    private static LocalDateTime businessNow() {
+        return LocalDateTime.now(BUSINESS_ZONE);
+    }
+
+    /**
      * 去重的写入与过期合成一条脚本发给 Redis。分三条命令发就有崩溃缝：SADD 之后、EXPIRE 之前进程挂掉，
      * 集合留下一个没有 TTL 的键，此后这篇文章的窗口永不关闭，阅读计数静默停摆且不报错。
-     * 语义与原三步一致：SADD 后若 TTL 仍为负（键刚建立，或改造前遗留的无过期时间旧键）才设过期，返回本次新增的成员数。
+     * 语义：SADD 后若 TTL 仍为负（键刚建立，或遗留的无过期时间旧键）才设过期，返回本次新增的成员数。
      * 包内可见只为让集成测试直接对真 Redis 跑一次脚本；生产路径只经 isFirstVisitWithinHour 进来
      */
     static final RedisScript<Long> VIEW_DEDUP_SCRIPT = RedisScript.of(
@@ -249,13 +264,20 @@ public class ArticleService {
     /**
      * 全站唯一的删除级联实现（business-model.md §5.7 第 7 条）：
      * 同一事务内按 post_tags → likes → comments → posts 的顺序先删子行、最后删主行。
-     * deletePost、deleteDraft、clearDrafts 都复用它，不得另写只删主表的旁路
+     * deletePost、deleteDraft、clearDrafts 都复用它，不得另写只删主表的旁路。
+     * 这篇文章引用的对象（封面 + 正文配图）排在提交成功之后异步回收（§3.3）：
+     * 四条 DELETE 回滚了文章还在，对象却已经删了，那是不可误删这条口径的反例
      */
     private void cascadeDelete(Long id) {
+        Post images = postMapper.findCoverAndContent(id);
+        List<String> targets = ImageReclaimService.referencedImages(images.getCover(), images.getContent());
+
         tagMapper.deletePostTags(id);
         likeMapper.deleteByPostId(id);
         commentMapper.deleteByPostId(id);
         postMapper.deleteById(id);
+
+        ImageReclaimService.afterCommit(targets, imageReclaimService::reclaim);
     }
 
     /**
@@ -291,14 +313,14 @@ public class ArticleService {
     /**
      * 定时发布的计划时刻：调度器按 published_at 到期命中，缺它文章永不自动发布。
      * 文案与 DTO 的 @Future 消息一致，避免同一规则出现两套说法。
-     * 「当前时间」固定取 Asia/Shanghai：publishTime 经 @JsonFormat(GMT+8) 反序列化就是北京墙钟，
-     * 若用 JVM 默认时区的 now() 对比，容器以 UTC 运行时校验会错位 8 小时
+     * publishTime 经 @JsonFormat(GMT+8) 反序列化就是北京墙钟，「当前时间」由 businessNow() 取同一基，
+     * 容器不以 +08:00 起跑时也不会把「晚于当前」判错 8 小时
      */
     private LocalDateTime requireFuturePublishTime(LocalDateTime publishTime) {
         if (publishTime == null) {
             throw new BizException("请选择定时发布时间");
         }
-        if (publishTime.isBefore(LocalDateTime.now(BUSINESS_ZONE))) {
+        if (publishTime.isBefore(businessNow())) {
             throw new BizException("定时发布时间需晚于当前时间");
         }
         return publishTime;
@@ -477,7 +499,7 @@ public class ArticleService {
         // 草稿免分类；对外发布（published / scheduled）必须已选分类
         requireCategoryWhenPublishing(post.getStatus(), post.getCategoryId());
         if ("published".equals(post.getStatus())) {
-            post.setPublishedAt(LocalDateTime.now());
+            post.setPublishedAt(businessNow());
         } else if ("scheduled".equals(post.getStatus())) {
             post.setPublishedAt(requireFuturePublishTime(createDTO.getPublishTime()));
         }
@@ -524,14 +546,22 @@ public class ArticleService {
             // 由草稿/定时改为已发布且从未记过发布时间时，补写当前时间，避免前台「发布于」为空。
             // published → offline 不命中任何分支，offline → published 因 published_at 已有值也不命中，
             // 故下线与重新上线都沿用首次对外可见的时刻
-            post.setPublishedAt(LocalDateTime.now());
+            post.setPublishedAt(businessNow());
+        } else if ("scheduled".equals(oldStatus) && "published".equals(newStatus)) {
+            // 提前手工发布：scheduled 期间 published_at 是计划时刻，若它还在未来就原样发布，
+            // 前台会显示「发布于未来」。以本次实际公开的时刻覆写（business-model.md §4.2 第 3 条）。
+            // 计划时刻已到的照旧沿用；调度器到点发布走的是批量 UPDATE、不经本方法，计划时刻不受影响
+            LocalDateTime now = businessNow();
+            if (post.getPublishedAt() != null && post.getPublishedAt().isAfter(now)) {
+                post.setPublishedAt(now);
+            }
         }
         // 下架留痕：只在「转入 offline」这一刻写入操作者与时刻，之后永不主动清空——
         // 把它放回去的人抹不掉「是谁、在什么时候撤下来的」这条记录
         if (!"offline".equals(oldStatus) && "offline".equals(newStatus)) {
             com.ayun.entity.User actor = currentUser();
             post.setOfflinedBy(actor.getId());
-            post.setOfflinedAt(LocalDateTime.now());
+            post.setOfflinedAt(businessNow());
         }
         generateExcerptIfAbsent(post);
         postMapper.update(post);
@@ -593,7 +623,7 @@ public class ArticleService {
     }
 
     /**
-     * 状态白名单：只认 posts.status 那四个 ENUM 值。过去非法值一路走到写库，由 MySQL 严格模式报错、
+     * 状态白名单：只认 posts.status 那四个 ENUM 值。不拦的话非法值会一路走到写库，由 MySQL 严格模式报错、
      * 对外冒成 500「服务暂时不可用」，调用方拿不到「是状态填错了」这句人话。
      * 不带状态即本次不改它（上下线之外的保存都走这条路），照常放行
      */

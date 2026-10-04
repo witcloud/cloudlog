@@ -20,7 +20,7 @@
         <p v-else class="drafts__count tnum">共 {{ draftCount }} 篇草稿</p>
       </div>
       <!-- 清空的对象是整个抽屉，所以它的显隐跟未筛的计数走，不跟当前视图走 -->
-      <button v-if="unpublishedTotal > 0" class="drafts__clear" @click="handleClearAll">
+      <button v-if="boxTotal > 0" class="drafts__clear" @click="handleClearAll">
         清空草稿箱
       </button>
     </header>
@@ -141,6 +141,26 @@ const total = ref(0)
 const draftCount = ref(0)
 const scheduledCount = ref(0)
 
+/**
+ * 整箱计数：不受 keyword/年月影响的那一组。
+ * 上面两个是「计数即视图」的，跟着筛选走，服务视图把手；
+ * 而清空删的是整箱——DELETE /drafts 不收筛选参数（后端 findDraftIdsByAuthor 只认作者与状态），
+ * 拿筛出来的数去确认整箱清空，说的是删 2 篇、按下去删光全箱。
+ * 取法：一次 pageSize=1 的无条件请求，只为要回那两个计数。
+ */
+const boxCounts = reactive({ draft: 0, scheduled: 0 })
+const boxTotal = computed(() => boxCounts.draft + boxCounts.scheduled)
+
+const fetchBoxCounts = async () => {
+  try {
+    const { data } = await getDrafts({ pageNum: 1, pageSize: 1 })
+    boxCounts.draft = data.draftCount
+    boxCounts.scheduled = data.scheduledCount
+  } catch (error) {
+    console.error('获取整箱计数失败:', error)
+  }
+}
+
 // 查询参数
 const queryParams = reactive<DraftListParams>({
   pageNum: 1,
@@ -255,6 +275,7 @@ const clearFilters = () => {
 
 onMounted(() => {
   fetchDrafts()
+  fetchBoxCounts()
 })
 
 const editDraft = (id: string) => {
@@ -262,8 +283,11 @@ const editDraft = (id: string) => {
 }
 
 const handleClearAll = () => {
+  // 数字取整箱计数，不取视图计数：列表筛过之后屏幕上只有 2 条，
+  // 但这一枪删的是全箱，文案说 2 篇就是骗人
+  const scope = hasFilter.value ? '（不按当前筛选，整箱全部删除）' : ''
   ElMessageBox.confirm(
-    `确定要清空草稿箱吗？共 ${unpublishedTotal.value} 篇（草稿 ${draftCount.value} · 定时 ${scheduledCount.value}）将被删除，此操作不可恢复！`,
+    `确定要清空草稿箱吗？共 ${boxTotal.value} 篇（草稿 ${boxCounts.draft} · 定时 ${boxCounts.scheduled}）${scope}将被删除，此操作不可恢复！`,
     '警告',
     {
       confirmButtonText: '删除',
@@ -275,6 +299,7 @@ const handleClearAll = () => {
       await clearAllDrafts()
       ElMessage.success('草稿箱已清空')
       fetchDrafts()
+      fetchBoxCounts()
     } catch (error) {
       console.error('清空草稿箱失败:', error)
     }
@@ -292,6 +317,7 @@ const confirmDelete = (draft: PostVO) => {
       ElMessage.success('草稿已删除')
       // 删除后自动刷新
       fetchDrafts()
+      fetchBoxCounts()
     } catch (error) {
       console.error('删除草稿失败:', error)
     }

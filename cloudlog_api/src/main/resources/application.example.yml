@@ -7,7 +7,13 @@ spring:
   application:
     name: CloudLog
   datasource:
-    url: jdbc:mysql://localhost:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    # 时刻列都是 TIMESTAMP，MySQL 按「会话时区」换算读写，NOW()/CURRENT_TIMESTAMP 也取会话钟。
+    # 光写 serverTimezone 只告诉驱动怎么解释值，并不会改会话——会话仍是主机的 SYSTEM，主机不是 +08 时
+    # 它就和服务层按北京墙钟写入的 published_at 变成两套基。forceConnectionTimeZoneToSession=true
+    # 才会把这个值发成 SET SESSION time_zone。用偏移量 +08:00 而不是 Asia/Shanghai：
+    # 命名时区要求库导入过时区表（mysql.time_zone_name 为空时直接报 1298，每条连接都建不起来）。
+    # 值里的 + 必须写成 %2B，否则会被解成空格。口径与回归见 DataSourceTimeZoneTest
+    url: jdbc:mysql://localhost:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
     username: root
     password: your_mysql_password
     driver-class-name: com.mysql.cj.jdbc.Driver

@@ -127,9 +127,8 @@ export function getAuthorLikedPosts(id: string, params: PageParams) {
  * @param newEmail 待绑定的新邮箱
  */
 export function sendEmailChangeCode(newEmail: string) {
-  return request.post<unknown, Result<void>>('/user/email/code', null, {
-    params: { newEmail },
-  })
+  // 走请求体：挂在查询参数上，这个邮箱就会进浏览器历史与反代的访问日志
+  return request.post<unknown, Result<void>>('/user/email/code', { email: newEmail })
 }
 
 /**

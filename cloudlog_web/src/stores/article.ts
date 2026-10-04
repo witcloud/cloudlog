@@ -47,6 +47,9 @@ export const useArticleStore = defineStore('article', () => {
   const fetchArticleDetail = async (id: string) => {
     loading.value = true
     detailFailed.value = false
+    // 换文章先把手上这篇交出去：不清的话新详情拉失败时，模板那条 v-else-if="article"
+    // 会排在失败分支之前，屏幕上还是上一篇的标题与正文，而地址栏已经是另一篇了
+    currentArticle.value = null
     try {
       const res = await getArticleDetail(id)
       if (res.code === 200) {

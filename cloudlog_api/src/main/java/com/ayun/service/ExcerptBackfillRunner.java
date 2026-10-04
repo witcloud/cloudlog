@@ -11,9 +11,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * 存量摘要回填。摘要自 2026-10-03 起改为正文的服务端派生物（business-model.md §2.3），
- * 那之前发布的一批文章 {@code excerpt} 是空的，列表卡片那一行与详情页 description 都缺内容，
- * 所以启动时把对外可见且摘要为空的文章补上
+ * 存量摘要回填。摘要是正文的服务端派生物（business-model.md §2.3），只在状态流转进
+ * published / scheduled 时生成，落库早于该口径的存量行 {@code excerpt} 是空的，
+ * 列表卡片那一行与详情页 description 都缺内容，所以启动时把对外可见且摘要为空的文章补上
  */
 @Slf4j
 @Component

@@ -25,6 +25,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -287,7 +288,7 @@ class CommentServiceTest {
     }
 
     @Test
-    @DisplayName("评论防护：距上一条评论不足间隔秒数时拒绝，报错不泄露具体还需等多久")
+    @DisplayName("评论防护：距上一条评论不足间隔秒数时拒绝，并把还剩几秒报出来")
     void addCommentWithinIntervalIsRefused() {
         loginAsReader();
         publishedPostExists();
@@ -296,7 +297,10 @@ class CommentServiceTest {
         RuntimeException error = assertThrows(RuntimeException.class, () -> commentService.addComment(
                 Comment.builder().postId(1L).content("再刷一条").build()));
 
-        assertEquals("操作过于频繁，请稍后再试", error.getMessage());
+        // 改前这条断言是「不泄露具体还需等多久」。登录锁定的 lockedMessage 本来就报剩余分钟，
+        // 两处口径不一致；而「稍后再试」不可行动——还剩几秒这件事系统一开始就知道
+        assertTrue(error.getMessage().matches("评论发得太快，请 \\d+ 秒后再试"),
+                "提示要报出还剩几秒，实际是：" + error.getMessage());
         verify(commentMapper, never()).insert(any(Comment.class));
     }
 
@@ -316,6 +320,24 @@ class CommentServiceTest {
         when(commentMapper.findLastCreatedAtByUserId(88L)).thenReturn(LocalDateTime.now().minusSeconds(61));
         assertEquals("approved",
                 commentService.addComment(Comment.builder().postId(1L).content("过了间隔再发").build()));
+    }
+
+    @Test
+    @DisplayName("评论防护：JVM 跑 UTC 时，两小时前评过的论不该把新评论永久挡死")
+    void intervalIsMeasuredInBusinessZone() {
+        loginAsReader();
+        publishedPostExists();
+        moderationEnabled();
+        // created_at 是北京墙钟，间隔也必须按北京墙钟算；本机 +08 时两种写法都对，所以把默认时区钉成 UTC
+        when(commentMapper.findLastCreatedAtByUserId(88L))
+                .thenReturn(LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusHours(2));
+
+        JvmClockProbe.underUtc(() -> {
+            Comment payload = Comment.builder().postId(1L).content("隔了两小时再发").build();
+            String status = assertDoesNotThrow(() -> commentService.addComment(payload),
+                    "上一条评论是两小时（北京墙钟）前落的，间隔只配了 60 秒，这次不该被挡");
+            assertEquals("approved", status, "机审未命中应直接通过");
+        });
     }
 
     @Test

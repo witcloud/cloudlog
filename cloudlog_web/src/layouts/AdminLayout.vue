@@ -89,7 +89,7 @@
         </div>
       </header>
 
-      <main class="admin__content">
+      <main class="admin__content" @click="onContentClick">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in" @after-leave="onAfterLeave">
             <component :is="Component" />
@@ -192,6 +192,16 @@ const onAfterLeave = () => {
   const y = scrollControl.pendingY
   scrollControl.pendingY = null
   window.scrollTo(0, y ?? 0)
+}
+
+/**
+ * 翻页后回到表头。分页器钉在卡片底部，翻完页人还停在页底，下一眼看不到第一行；
+ * 而换页不改路由，上面那条 after-leave 管不到。
+ * 走一处委托而不是给六个分页器各加一个 handler：后台每一张表都该有这一条，
+ * 少一处就多一处不一致。
+ */
+const onContentClick = (event: MouseEvent) => {
+  if ((event.target as HTMLElement).closest('.el-pagination')) window.scrollTo(0, 0)
 }
 
 onMounted(() => {

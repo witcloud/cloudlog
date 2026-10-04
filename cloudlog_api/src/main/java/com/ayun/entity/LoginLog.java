@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * 登录尝试日志实体（business-model.md §2.10）
+ * 登录尝试日志实体（business-model.md §2.12）
  */
 @Data
 @Builder

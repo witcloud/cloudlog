@@ -115,14 +115,17 @@ export function updateArticle(id: string, data: Record<string, unknown>) {
 /**
  * 上传文章内容图片
  * @param file 图片文件
+ * @param signal 关闭上传弹窗时用它撤掉在途请求：不撤的话对象照样落桶、日额度照样扣，
+ *               而屏幕上已经看不见这一枪了
  */
-export function uploadArticleImage(file: File) {
+export function uploadArticleImage(file: File, signal?: AbortSignal) {
   const formData = new FormData()
   formData.append('file', file)
   return request.post<unknown, Result<string>>('/upload/article-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     // 全局 10s 对大图弱网上传偏紧，上传请求单独放宽
     timeout: 60000,
+    ...(signal ? { signal } : {}),
   })
 }
 

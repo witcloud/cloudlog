@@ -7,6 +7,7 @@
           <el-avatar :size="76" :src="formatMinioUrl(profile.avatar) || defaultAvatarUrl" />
           <div class="author-profile__id">
             <h1 class="author-profile__name">{{ profile.username }}</h1>
+            <p v-if="profile.occupation" class="author-profile__occupation">{{ profile.occupation }}</p>
             <p v-if="profile.bio" class="author-profile__bio">{{ profile.bio }}</p>
           </div>
           <el-button
@@ -115,7 +116,12 @@
                   @click="goToArticle(post.id)"
                 >
                   <div class="post-row__main">
-                    <h3 class="post-row__title">{{ post.title || '无标题' }}</h3>
+                    <h3 class="post-row__title">
+                      <!-- 整行 @click 只有鼠标能走：Tab 到不了这一行，中键也开不了新标签 -->
+                      <RouterLink class="post-row__link" :to="`/articles/${post.id}`">
+                        {{ post.title || '无标题' }}
+                      </RouterLink>
+                    </h3>
                     <p class="post-row__meta">
                       <span>{{ post.category?.name || '未分类' }}</span>
                       <span class="post-row__divider" aria-hidden="true"></span>
@@ -126,7 +132,12 @@
               </ul>
 
               <div v-else-if="!loading && !loadingMore && !postsStale" class="empty-state">
-                <template v-if="keyword">
+                <template v-if="postsFailed">
+                  <p class="empty-state__title">这一栏没有加载出来。</p>
+                  <p class="empty-state__hint">服务没有正常响应，与 TA 有没有文章无关。</p>
+                  <button class="empty-state__action" @click="fetchPosts()">重试</button>
+                </template>
+                <template v-else-if="keyword">
                   <p class="empty-state__title">没搜到「{{ keyword }}」。</p>
                   <p class="empty-state__hint">换个词试试。</p>
                   <button class="empty-state__action" @click="keyword = ''">清除搜索</button>
@@ -175,6 +186,12 @@
                 </li>
               </ul>
 
+              <div v-else-if="listFailed.following" class="empty-state">
+                <p class="empty-state__title">这一栏没有加载出来。</p>
+                <p class="empty-state__hint">服务没有正常响应，与 TA 关注了谁无关。</p>
+                <button class="empty-state__action" @click="fetchTab('following')">重试</button>
+              </div>
+
               <div v-else-if="!listLoading.following" class="empty-state">
                 <p class="empty-state__title">{{ profile.username }} 还没有关注任何人。</p>
                 <p class="empty-state__hint">TA 在这里关注的人会出现这一栏。</p>
@@ -206,6 +223,12 @@
                 </li>
               </ul>
 
+              <div v-else-if="listFailed.followers" class="empty-state">
+                <p class="empty-state__title">这一栏没有加载出来。</p>
+                <p class="empty-state__hint">服务没有正常响应，与谁关注了 TA 无关。</p>
+                <button class="empty-state__action" @click="fetchTab('followers')">重试</button>
+              </div>
+
               <div v-else-if="!listLoading.followers" class="empty-state">
                 <p class="empty-state__title">{{ profile.username }} 还没有粉丝。</p>
                 <p class="empty-state__hint">关注 TA 的人会出现在这一栏。</p>
@@ -223,7 +246,12 @@
                   @click="goToArticle(post.id)"
                 >
                   <div class="post-row__main">
-                    <h3 class="post-row__title">{{ post.title || '无标题' }}</h3>
+                    <h3 class="post-row__title">
+                      <!-- 整行 @click 只有鼠标能走：Tab 到不了这一行，中键也开不了新标签 -->
+                      <RouterLink class="post-row__link" :to="`/articles/${post.id}`">
+                        {{ post.title || '无标题' }}
+                      </RouterLink>
+                    </h3>
                     <p class="post-row__meta">
                       <span>{{ post.category?.name || '未分类' }}</span>
                       <span class="post-row__divider" aria-hidden="true"></span>
@@ -232,6 +260,12 @@
                   </div>
                 </li>
               </ul>
+
+              <div v-else-if="listFailed.liked" class="empty-state">
+                <p class="empty-state__title">这一栏没有加载出来。</p>
+                <p class="empty-state__hint">服务没有正常响应，与 TA 点赞过什么无关。</p>
+                <button class="empty-state__action" @click="fetchTab('liked')">重试</button>
+              </div>
 
               <div v-else-if="!listLoading.liked" class="empty-state">
                 <p class="empty-state__title">{{ profile.username }} 还没有点赞过文章。</p>
@@ -307,12 +341,16 @@ const sentinel = ref<HTMLElement>()
 const keyword = ref('')
 /** 搜索词已改、结果还没换过来：这段时间既不算「没有更多」，也不许追加 */
 const postsStale = ref(false)
+/** 列表拉失败与「这位作者没写过文章」是两件事，混说会把服务故障算到作者头上 */
+const postsFailed = ref(false)
+const listFailed = ref({ following: false, followers: false, liked: false })
 
 const hasMore = computed(
   () => !postsStale.value && !exhausted.value && posts.value.length < total.value,
 )
 
 type TabKey = 'posts' | 'following' | 'followers' | 'liked'
+const TAB_KEYS: TabKey[] = ['posts', 'following', 'followers', 'liked']
 
 const tab = ref<TabKey>('posts')
 /** 除「TA 的文章」外三栏都 20 行封顶、不翻页，与个人页 ProfileFollowList 同一口径 */
@@ -327,6 +365,7 @@ let loadedTabs = new Set<TabKey>()
 const fetchTab = async (key: Exclude<TabKey, 'posts'>) => {
   loadedTabs.add(key)
   listLoading.value[key] = true
+  listFailed.value[key] = false
   const params = { page: 1, pageSize: LIST_PAGE_SIZE }
   try {
     if (key === 'following')
@@ -337,6 +376,7 @@ const fetchTab = async (key: Exclude<TabKey, 'posts'>) => {
   } catch (error) {
     // 拉失败就作废，切回来还能重试
     loadedTabs.delete(key)
+    listFailed.value[key] = true
     console.error('获取作者主页列表失败:', error)
   } finally {
     listLoading.value[key] = false
@@ -345,6 +385,14 @@ const fetchTab = async (key: Exclude<TabKey, 'posts'>) => {
 
 watch(tab, (next) => {
   if (next !== 'posts' && !loadedTabs.has(next)) fetchTab(next)
+})
+
+/** 栏位镜像进 URL（replace 不塞历史）：刷新或把链接发给别人，回来还在同一栏。
+ *  搜索词刻意不进 URL —— 它挂的是 sync flush + 800ms 防抖，从地址栏回填会在首屏
+ *  与 loadAll 那次 fetchPosts 撞成两发同参数请求；栏位才是刷新后真回不去的那个状态 */
+watch(tab, (next) => {
+  if (route.name !== 'AuthorProfile') return
+  router.replace({ query: { ...route.query, tab: next === 'posts' ? undefined : next } })
 })
 
 /** 每次拉完都重新观察一次哨兵：observe() 必定异步回调一次当前相交状态，
@@ -363,6 +411,7 @@ const observeSentinel = async () => {
 const fetchPosts = async (append = false): Promise<boolean> => {
   const word = keyword.value
   if (append) loadingMore.value = true
+  postsFailed.value = false
   try {
     const { data } = await getArticles({
       page: page.value,
@@ -380,6 +429,7 @@ const fetchPosts = async (append = false): Promise<boolean> => {
     return true
   } catch (error) {
     console.error('获取作者文章列表失败:', error)
+    postsFailed.value = true
     return false
   } finally {
     loadingMore.value = false
@@ -520,11 +570,18 @@ const reset = () => {
   fans.value = []
   liked.value = []
   listLoading.value = { following: false, followers: false, liked: false }
+  postsFailed.value = false
+  listFailed.value = { following: false, followers: false, liked: false }
   loadedTabs = new Set()
 }
 
 const loadAll = async () => {
   reset()
+  // 地址栏写着哪一栏就开哪一栏（上一行的 reset 把 tab 收回了 posts）
+  const tabFromRoute = route.query.tab
+  if (typeof tabFromRoute === 'string' && TAB_KEYS.includes(tabFromRoute as TabKey)) {
+    tab.value = tabFromRoute as TabKey
+  }
   loading.value = true
   try {
     const { data } = await getAuthorProfile(authorId.value)
@@ -597,6 +654,12 @@ watch(
   font-weight: 700;
   line-height: 1.3;
   color: var(--color-ink);
+}
+
+.author-profile__occupation {
+  margin: var(--space-3xs) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
 }
 
 .author-profile__bio {
@@ -824,6 +887,12 @@ watch(
 
   &:hover {
     color: var(--color-accent);
+  }
+
+  /* 标题现在是真链接，外观一个字不许变：墨色从 h3 继承，也不给下划线 */
+  .post-row__link {
+    color: inherit;
+    text-decoration: none;
   }
 }
 

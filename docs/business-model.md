@@ -1,24 +1,15 @@
 # CloudLog 业务模型与技术约束
 
-> **用途**：本文件是 CloudLog 的项目规范真源，面向 AI Agent。任何改动前先读本文件；与本文件冲突的实现，以本文件为准并回头修订本文件。
-> **范围**：只规定业务语义与技术约束。**不含**代码、UI 视觉与交互细节、数据库表结构（DDL 与列类型见 `docs/schema.sql`，那是字段级唯一真源）。视觉与交互见 [`ui-design.md`](./ui-design.md)，库表与索引见 [`db-design.md`](./db-design.md)。
-> **文档沿革**：本稿按用户裁决替换 2026-09-28 稿，旧稿（Part A/B/C 分节结构）已作废且**不留档**。`db-design.md` 与 `ui-design.md` 仍按旧锚点引用本文，**读旧编号时查文末附录**。
-> **核对基准**：2026-09-29，对象为工作区 `cloudlog_api/`、`cloudlog_web/`，静态读码得出，未运行程序、未发请求。标注为「已实现」只代表代码链路读通，不代表实测通过。
-> **2026-10-01 增量**：按用户裁决新增关注能力（§2.1、§2.8、§3.2、§4.7、§5.5、§5.7 第 12 条、§6）。`likes` 链路在核对基准之后落地，§2.7、§3.1 点赞行、§4.5、§5.7 第 7 条已按代码回改。**关注与点赞的「已实现」都止于代码链路 + 服务层单测**（`FollowServiceTest` 8 项通过），未发过 HTTP 请求、未在浏览器实测；关注还需先建 `follows` 表才可用。
-> **2026-10-02 增量（全量完善）**：按用户裁决完成一轮代码与文档的对齐。① 违禁词机审落地（§2.6、§4.4 第 1/2 条由「文档描述」变为「代码实现」，后台设置页新增词库输入项）；② `POST /comments` 契约落地（`data` 返回最终 `status`，前端不再反推）；③ 关注/粉丝列表与我点赞的文章列表**转正**（原 §6「不做粉丝与关注列表页」按主流设计修订，见 §6）；④ 文章页分享入口**转正**（ui-design §3.2）；⑤ 审核回审**转正**（§4.4 第 6 条）；⑥ 定时发布执行、评论前后台接线、邮箱修改、关于页后端化、401 拦截器五项由「未实现/部分实现」改为「已实现」；⑦ 草稿免分类落地（§4.2 第 1 条）；⑧ 草稿删除并入全站唯一级联实现（§5.7 第 7 条）；⑨ 导航进度条接线（`nprogress` 从「只声明、零引用」补上引用，动效白名单由三类扩为四类，见 ui-design §4.7，它与页面占位的分工写在 §5.1；已在浏览器实测取到条体与计算样式）。
-> **2026-10-02 增量（分类逻辑）**：① 分类计数拆为两个口径、两条查询——公开 `GET /categories` 只计 `published`，全量口径（含草稿/定时）改由新增的 `GET /admin/categories` 承担（§2.4、§4.6 第 1 条、§5.5）；改前匿名请求者可从公开计数推出每个分类下的未发布篇数。② 删除分类改为**分类下仍有文章（含草稿）即拒绝**（§4.6 第 2 条）；原先「删除后这些文章将显示为『未分类』」的确认文案是与行为脱节的承诺。③ `getAdminCategories` 原先实际打的是公开 `GET /categories`（注释写「复用 /admin/categories」是错的），现改调管理端端点；前台分类筛选的 URL 定位符同期由分类名改为分类 id（旧名链接保留兼容读取），参数名按附录 B2.2 的口径以代码与接口文档为准，本文不定义。核查到 2026-10-02：`MetaServiceTest` 4 项通过（新增禁删与空分类两例）、上下文装配通过；两口径的差量以只读 SQL 对本地开发库核过（「技术」3/6、「学习」0/1、「生活」0/0）；未发 HTTP 请求、未在浏览器实测。
-> **2026-10-03 增量（违禁词库独立成表）**：按用户裁决把评论违禁词从「系统设置里的一个逗号分隔文本项」重构为「评论管理内的独立词库」。① 词库落为 `banned_words` 表（一词一行、`word` 唯一、可逐条启停），`site_settings` 的 `banned_words` 键删除、**旧值直接丢弃不迁移**（§2.6、§2.9、db-design.md §2.10/§2.12）——原先 `VARCHAR(255)` 压出的约 80 词上限随之消失。② 处置动作分级为 `pending`（落待审）/ `reject`（直接拒绝），**推翻了原 §4.4 第 3 条「机审不做终局裁决」的绝对表述**：终局与否改由博主逐词决定，默认仍是 `pending`（§4.4 第 2/3 条、§6）。③ 待审评论记录首个命中词 `comments.hit_word`，审核台从此能回答「当初为什么被拦下」（§2.5、§4.4 第 3 条）。④ 管理入口从「系统设置」移到「评论管理」，新增批量导入：原始文本按换行 + 中英文逗号拆分、trim、去空去重，回 `{ added, skipped }`（ui-design.md §3.11）。⑤ 匹配策略**不变**：两边转小写的子串包含，不分词、不做 AC 自动机、不做正则（§4.4 第 2 条、§6）。⑥ 词库读取加**进程内缓存**，任何写操作后整体失效；不引入缓存框架、不落 Redis，只在单实例部署假设下成立（§5.7 第 4/5 条、db-design.md §2.12）。核查到 2026-10-03：`CommentServiceTest` 8 项、`BannedWordServiceTest` 15 项通过；词库的增 / 批量导入（`added`/`skipped`）/ 启停 / 删 / 搜、`reject` 词拒绝评论、`pending` 词落待审并写 `hit_word`、设置页不再出现词库输入，均已以真实登录态走 HTTP 与浏览器实测（自建 8082 后端 + 5175 前端，未触碰他人进程），测试数据已清理。
-> **2026-10-03 增量（启用文章级 SEO 元数据）**：按用户裁决把 `seo_meta` 从预留表位建成完整读写链路，实体、写入规则与回退链见 §2.10，库侧规则见 `db-design.md` §2.8。① 写入挂在 `POST /articles`、`PUT /articles/{id}` 的三个可选入参上：**三者都不带即不动该行**（自动保存与后台上下线迁移走的都是这条）、空串即清空该列、归一后全空即删该行、超 255 回 400；落库是一条打在 `post_id` 唯一键上的 `INSERT … ON DUPLICATE KEY UPDATE`。② 回退只在服务层算一次：标题→`文章标题 - 站点名`（站点名取 `site_settings.site_name`）、描述→`posts.excerpt`、关键词→标签名拼接；**作者填了 SEO 标题就整条原样用作 `document.title`，不再追加站点名**（用户裁决，存量数据自带后缀，一律拼接会变双后缀）。③ 公开详情返回已回退三字段，`GET /articles/{id}/seo` 返回库里原样值且仅作者与博主可读，按 §5.5 那条陷阱排在 `GET /articles/**` 通配之前。④ `seo_meta` 并入文章级联删除（§5.7 第 7 条），后台列表带 `seoConfigured`、新增 `GET /admin/seo-meta/missing`，前台 `src/utils/seo.ts` 改读后端回退结果并新增路由切换时的 meta 复位（原先详情页自己拿摘要与标签做回退，且站内换篇不更新 meta）。⑤ 明确**不做 SSR / 预渲染**（§6）。核查到 2026-10-03：`ArticleServiceTest` 58 项、`SeoMetaMapperTest` 5 项（对本地真库验 upsert 命中唯一键、两条后台查询同口径）、`PostListQueryTest` 6 项、`AdminArticleServiceTest` 1 项通过（按类名 scoped 跑，非全量）；写规则五条、级联不留孤儿行、匿名取原文 401、登录读者取原文 404、后台标记 True/False、待补全清单与库内 COUNT 一致（4→3→4），均以自建隔离栈（18080 后端 + 5199 前端 + 15 分钟本地 token）走真实 HTTP 与浏览器实测——详情页 `document.title` 与三条 meta 在「已填」「未填」两篇文章上各自正确，离开文章页后描述回到 `index.html` 的站点默认，编辑器「SEO 设置」段默认收起且能回显库里原值。**测试数据自建自删**：一篇草稿全程自建自删，文章 6 的 SEO 填完即清空，`seo_meta` 仍是原有的 4 行（那 4 行是本轮之前就存在的种子数据，读路径接通后直接生效）。顺带修了一处不属于本轮的测试缺口：`ArticleServiceTest` 缺 `VisitLogService` 的 mock，导致 9 个用例 NPE。
-
-> **2026-10-03 增量（启用访问日志）**：按用户裁决把 `visit_logs` 从预留表位建成完整链路，业务规则见 §2.11、库侧见 `db-design.md` §2.9。① 写入挂在详情页的阅读量判据上：命中 `article:view_dedup` 小时窗口首访时 `@Async` 落一行，bot 与空 UA 不写，写失败只记 error 不影响详情；原始地址入库，脱敏只在读取侧。② 保留期 180 天，`LogRetentionService` 每天 03:30 删（`@Scheduled`，§5.7 第 5 条允许的内建能力），后续登录日志的清理并入同一任务。③ 后台新增**唯一一项**「日志管理」导航 → `/admin/logs/visits`：概览四卡 + 纯 CSS 趋势柱（不引图表库）+ 三个 Top 榜 + 明细分页；登录日志只有占位页签与空态。④ §2.7 因此清空为「当前无此类实体」；§5.6、§6、README 与 `db-design.md` §2/§3.1/§4/§5.2 里「访问行为不入库」「不做访问来源分析」的旧口径同轮改为实际口径。核查到 2026-10-03：新增 5 个测试类共 42 项通过（`IpMaskUtilsTest` 7、`UserAgentClassifierTest` 9、`VisitLogServiceTest` 4、`AdminVisitLogServiceTest` 12、`VisitLogMapperTest` 10——最后一条对本地真库跑聚合 SQL，整类在事务里回滚），`ArticleServiceTest` 58 项无回归。写路径与后台接口以自建后端（18081，不碰他人进程）走真实 HTTP 验过：同一访问者同小时两次访问 → `view_count` 与日志行各 +1、第三次不再动；bot UA 与空 UA → 详情 200 但零行；概览 PV 与明细 total 同窗口对齐（8 = 8）、今日视图出满 24 根小时柱且各柱之和 = PV、地址下发为 `203.0.*.*` / `0:0:*` 且响应内无完整地址、非管理员 403、匿名 401、超 90 天回 400；后台页面在浏览器明暗两态实测取到计算样式。**探针数据自建自删**：两行日志与该篇 `view_count` 已还原。**未做**：`idx_created_at` 只进了 `docs/schema.sql`，本地开发库仍缺这枚索引（DDL 交回用户执行，见 §2.9 与 `db-design.md` §4.1）。
-
-> **2026-10-03 增量（摘要全自动 + SEO 补全）**：按用户裁决把摘要从「作者可填」改为「正文的服务端派生物」，并补齐 SPA 架构下能做的 SEO 能力。**不做 SSR / 预渲染 / 无头浏览器渲染**，§6 那条口径原样保留。① **摘要**：`POST /articles` 与 `PUT /articles/{id}` 的 `excerpt` 入参删除（客户端传了也不认），改由 `ExcerptUtils.generate(content, 150)` 在状态流转进 `published` / `scheduled` 且该列为空时派生并落库（§2.3、§4.2 第 6 条）。已有摘要**不重算**，所以列表行与详情页 description 不随每次保存漂移；草稿永不生成。定时发布在落库时就带上摘要——调度器那条 `UPDATE posts SET status = 'published' …` 不加载实体，钩子挂不到它身上。前端右侧栏的「摘要」段与「自动生成」按钮随之删除。② 存量补票走启动期 `ExcerptBackfillRunner`：扫 `published` / `scheduled` 且摘要为空的行逐篇派生，幂等靠扫描谓词本身（落库后不再命中），派生结果为空的行不写回；`app.backfill.excerpt` 默认开，只回写 `excerpt` 一列并以 `updated_at = updated_at` 压住列上的 `ON UPDATE`，免得存量文章在排序与 lastmod 上集体变成「刚刚编辑过」。核查到 2026-10-03：`ExcerptUtilsTest` 13 项（代码块 / 行内代码 / 图片 / 链接 / 纯图正文 / 块级标记 / 强调符与词内连字符下划线 / HTML 标签与比较式 / 空白折叠 / 超长中文 / 恰好到上限 / emoji 码点边界 / 空输入）、`ArticleServiceTest` 66 项、`ExcerptBackfillRunnerTest` 4 项通过；前端 `npm run build`（含 `vue-tsc --build`）通过。③ **手动 SEO 链路整体下线**：`seo_meta` 表、`SeoMeta` 实体与 `SeoMetaMapper`、创建与更新入参的三个可选 SEO 字段及其「都不带即不动该行 / 全空即删行 / 超 255 回 400」那套写入规则、原文回显端点 `GET /articles/{id}/seo`（连同 §5.5 过滤链里为它单排的一条鉴权）、编辑器的「SEO 设置」折叠段全部删除；详情接口照旧返回 `seoTitle` / `seoDescription` / `seoKeywords`，但改为**纯合成、不查库**（`ArticleService.fillResolvedSeo` 一条搞定）。④ 后台那一整套 SEO 审计面同轮删除（用户裁决「一并删除」）：`GET /admin/seo-meta/missing`、`AdminArticleService.getSeoMissing`、`PostMapper.findPublishedMissingDescription` 与 `seoDescriptionFilled` 片段、`Post.seoConfigured` 与从未被装配的 `Post.seo` 字段、`AdminArticleVO.seoConfigured`、后台文章表的「SEO」列与「待补全 SEO」开关。此处必须留一句教训：那份 `EXISTS` 片段同时被后台文章列表主查询 `findAdminAll` 用作派生列，**只删表不摘片段会让整张后台列表 500**，不是只少一个筛选项。核查到 2026-10-03：`ArticleServiceTest` 由 66 项减到 58 项（删除 8 条写规则与原文回显用例，详情合成保留并补一条「摘要为空、无标签即留空」）、`SeoMetaMapperTest` 5 项随表删除，全量 `mvn -o clean test` 313 项通过；前端 `npm run build` 通过，`grep` 全仓 `seo_meta` 在代码侧零命中（文档历史注记除外）。⑤ **P0 静态产物**：新增 `SeoPublicController` 三条匿名 GET（`/robots.txt`、`/sitemap.xml`、`/feed.xml`，§3.2 新增行），`SeoPublicService` 手拼 XML 与转义、不引模板引擎与 RSS 库；站点对外域名落 `site_settings.site_url`（`SettingsService.getSiteUrl()`，后台「系统设置 → 站点信息」新增输入项，含协议校验），未配置按当次请求 Host 兜底。这里有一条必须写下来的前提：应用挂在 `server.servlet.context-path: /api/v1` 上，这三份的实际地址是 `/api/v1/…`，**爬虫要的域名根路径靠 nginx 三条 `location =` 精确映射达成**（README 新增一节给出写法；用前缀匹配会被 SPA 的 `try_files` 兜成一份 HTML，等于发了一份空 robots）。⑥ 顺带补记 `db-design.md` §2.10 的键清单：`site_name`、`icp_number`、`comment_max_length`、`comment_interval_seconds` 四键早已在代码里读写却从未入表，与「新键必须先写入本文再使用」相违，连同新增的 `site_url` 一并补齐。⑦ **P1 运行时 meta 补全**：`src/utils/seo.ts` 的 `setSeoMeta` 增可选 `image` / `publishedTime` / `tags` / `structuredData` 四个入参，新写 `og:image`（无封面回落 `/apple-touch-icon.png`，有图才给 `twitter:card=summary_large_image`）、`og:site_name`、`article:published_time`（后端那串 `yyyy-MM-dd HH:mm:ss` 统一经 `toIso8601` 换算，meta 与 JSON-LD 同一函数）、每标签一枚 `article:tag`；`canonicalUrl()` = `origin + pathname`（**去查询参数**），`og:url` 改用它。文章详情页新增 `<script type="application/ld+json">` 的 Article 结构（headline / datePublished / author=站点名 / image / description / mainEntityOfPage），序列化时把 `<` 转成 `\u003c` 封掉「标题里带 `</script>` 就能提前结束脚本」这条注入面。`resetSeoMeta` 的 teardown 相应扩三类：`article:*` 前缀整批清、`link[rel=canonical]`、`script[data-seo-jsonld]`——原有的 `meta[property=…]` 循环删不掉非 meta 元素，漏一项就是「首页挂着上一篇的 canonical」。核查到 2026-10-03：浏览器在 `#/articles/2`（有封面）取到 `og:image` 为库里那串封面原址、`twitter:card=summary_large_image`、两枚 `article:tag`、canonical 与 JSON-LD 齐全；`#/articles/1`（无封面）回落 `/apple-touch-icon.png` 且 card 为 `summary`；从文章页**经 SPA 路由**回首页后 `og:*` / `twitter:*` / `article:*` / canonical / JSON-LD 五类全部为零。三份静态产物以自建后端（18081，不碰他人进程）实抓：`robots.txt` 为 `text/plain;charset=UTF-8` 且 `Sitemap:` 行随站点域名配置（未配置时按请求 Host 兜底，与文档口径一致），`sitemap.xml` 9 条 url + 首页、`lastmod` 带 `+08:00` 偏移，`feed.xml` 9 个 item，两份都过 `xmllint --noout`；启动期回填在这条链路里命中 0 行（`Total: 0`），即幂等成立。
+> **用途**：CloudLog 的项目规范真源，面向 AI Agent，任何改动前先读本文。
+> **范围**：只规定业务语义与技术约束。字段、类型、索引等库表细节以 [`schema.sql`](./schema.sql) 为字段级唯一真源；库表与索引设计见 [`db-design.md`](./db-design.md)，视觉与交互见 [`ui-design.md`](./ui-design.md)，本文均不复述。
+> **真源**：业务口径以代码与 `docs/schema.sql` 为准；本文与之冲突时，以代码为准回改本文，不反向推翻代码。
+> **维护约定**：新裁决先以现在时改入正文对应小节，再在附录 B 追加一行；禁止在文件头堆叠增量段，修订历史只存在于附录 B；外部文档引用的旧编号（Part A/B/C）对照见文末「附录 · 旧编号对照」。
 
 ---
 
 ## 1. 项目定位与目标
 
-**定位**：单作者（博主本人）个人博客系统。博主产出内容，读者阅读、评论、点赞。前后端分离，代码共存于同一仓库。
+**定位**：个人博客系统。博主产出内容，读者阅读、评论、点赞。前后端分离，代码共存于同一仓库。
 
 **目标**：
 
@@ -38,9 +29,8 @@
 User 1─N Post          Post N─M Tag（经 PostTag 关联）
 User 1─N Comment       Category 1─N Post（可空归类）
 User 1─N Like          Post 1─N Comment（parent_id 自引用，最多两级）
-Post 1─1 SeoMeta       Post 1─N VisitLog
+Post 1─N VisitLog      User 1─N LoginLog（只有登录成功的那一行回填 user_id，失败行按输入的邮箱留痕）
 User 1─N Follow N─1 User（读者 → 作者，单向表态）
-User 1─N LoginLog（只有登录成功的那一行回填 user_id，失败行按输入的邮箱留痕）
 ```
 
 所有关联都是**逻辑关联，无物理外键**，完整性由应用层维护。`SiteSetting` 是独立 KV，不与任何实体关联；`BannedWord`（违禁词库）同样独立——`comments.hit_word` 存的是命中当刻的词面字符串，不是指向词库的引用（§2.9）。
@@ -67,22 +57,24 @@ User 1─N LoginLog（只有登录成功的那一行回填 user_id，失败行�
 | id | 主键 | **`BIGINT` 雪花 ID，由应用层生成，不来自数据库自增**；对外以字符串传输（db-design.md §1.1.1） |
 | title | 标题 | 必填、非空 |
 | content | 正文 | 存 **Markdown 源文**，不存渲染结果；HTML 由前端渲染 |
-| excerpt | 摘要 | **正文的服务端派生物，作者侧没有输入口**（2026-10-03）：状态流转进 `published` / `scheduled` 且该列为空时由 `content` 生成（算法与 150 码点上限见 `ExcerptUtils`），已有值不重算；草稿恒不生成。列表页那一行与详情页 description 都用它 |
+| excerpt | 摘要 | **正文的服务端派生物，作者侧没有输入口**：状态流转进 `published` / `scheduled` 且该列为空时由 `content` 生成（算法与 150 码点上限见 `ExcerptUtils`），已有值不重算；草稿与下线不生成。列表页那一行与详情页 description 都用它 |
 | cover | 封面图 | 完整 URL，可空 |
 | author_id | 作者 | `BIGINT`，取作者的雪花 ID；服务端由登录态回填，不接受客户端指定 |
 | category_id | 分类 | 可空；发布为 `published` 或转为 `scheduled` 前必须已选分类 |
-| status | 生命周期状态 | `draft` / `published` / `scheduled`，默认 `draft`；语义见 §3.2 与 §4.2 |
+| status | 生命周期状态 | `draft` / `published` / `scheduled` / `offline` 四态，默认 `draft`；`offline` 为已下线，仅作者与博主可见；语义见 §3.2 与 §4.2 |
 | is_top | 置顶 | `1` 置顶，在 `latest` 与 `recommended` 两个分支中前置（`popular` 是纯热度、不看它，口径见 §3.2「排序参数」） |
+| top_order | 置顶排序权重 | 越大越靠前；**仅 `is_top=1` 时参与排序**，默认 `0`（`latest` / `recommended` 分支使用，口径见 §3.2「排序参数」） |
 | view_count | 阅读量 | 冗余计数，**只对已发布文章** +1，且同一访问者 1 小时窗口内只计一次（口径见 §5.6） |
 | like_count | 点赞数 | 冗余计数，**语义就是「去重后的点赞人数」**：`likes` 有唯一键 `uk_post_user (post_id, user_id)` 保证一人一赞，每次点赞/取消后按 `likes` 实际条数**绝对重算**写回，不做 `+1/-1` 盲增（§3.1「点赞」、§4.5 第 4 条、`db-design.md` §5.2）。存量脏值由下一次点赞/取消的重算顺带修正 |
 | comment_count | 评论数 | 冗余计数，**仅 `approved` 评论计入**，扣减不得为负 |
-| published_at | 首次对外可见时刻 | 可空；文章首次成为 `published` 之后不再变化；`scheduled` 期间它是可覆盖的计划时刻；`scheduled → draft` 时清空 |
+| published_at | 首次对外可见时刻 | 可空；文章首次成为 `published` 之后不再变化；`scheduled` 期间它是可覆盖的计划时刻；`scheduled → draft` 时清空；下线与重新上线都不改写它 |
+| offlined_by / offlined_at | 下架留痕 | 最近一次执行「下线」的操作者用户 ID（雪花 ID）与时刻；**重新上线不清空**，执行者无法经由文章接口抹掉它 |
 
 ### 2.4 Category / Tag / PostTag（归类）
 
 | 实体 | 字段 | 说明 |
 |---|---|---|
-| Category | id、name（唯一）、description | 一篇文章**至多属于一个分类**；列表侧的 `articleCount` 是查询时派生的，不是存储字段。**计数分两条查询、两个口径**：公开 `GET /categories` 只计 `published`，管理端 `GET /admin/categories` 计全量（含 `draft` / `scheduled`）——按 §4.3 第 2 条的口径，草稿的篇数本身就是一种存在性泄露，不能让匿名请求者从公开计数里推断出来 |
+| Category | id、name（唯一）、description | 一篇文章**至多属于一个分类**；列表侧的 `articleCount` 是查询时派生的，不是存储字段。**计数分两条查询、两个口径**：公开 `GET /categories` 只计 `published`，管理端 `GET /admin/categories` 计全量（含 `draft` / `scheduled` / `offline`）——按 §4.3 第 2 条的口径，未发布篇数本身就是一种存在性泄露，不能让匿名请求者从公开计数里推断出来 |
 | Tag | id、name（唯一） | 文章与标签多对多；支持「合并标签」（把源标签的关联整体改写到目标标签） |
 | PostTag | post_id、tag_id（联合主键） | 纯关联表，无自有业务字段 |
 
@@ -94,7 +86,7 @@ User 1─N LoginLog（只有登录成功的那一行回填 user_id，失败行�
 | post_id | 所属文章 | 必填；`BIGINT`，取文章的雪花 ID |
 | user_id | 评论者 | `BIGINT`（用户雪花 ID）；可空（NULL = 匿名）。但**当前 HTTP 路径无法产生匿名评论**：提交评论需登录，且服务端用会话身份覆盖请求体中的用户标识，客户端伪造他人身份的路径已封 |
 | content | 正文 | 必填、非空 |
-| parent_id | 回复目标 | `0` = 根评论，否则为父评论 ID；**最多两级**，不做无限嵌套 |
+| parent_id | 回复目标 | `0` = 根评论，否则为父评论 ID；落库前 null 归一为 `0`（读侧只认 `0`，不归一就是「发得出、计数照加、列表看不见」的幽灵评论）；**最多两级**，不做无限嵌套 |
 | status | 审核状态 | `pending` / `approved` / `rejected`；由服务端按站点开关与违禁词机审共同决定，**不接受客户端指定** |
 | hit_word | 机审命中词 | 可空。落 `pending` 时写入**首个**命中的违禁词，让审核台能解释「当初为什么被拦下」；命中 `reject` 词的评论直接被拒、不入库，未命中与关审核时为 `NULL`。它是**值拷贝不是引用**：词库此后删词、改词、停用都不回写存量评论（§2.9、§4.4 第 3 条）。同样**不接受客户端指定** |
 
@@ -107,11 +99,11 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 | `comment_moderation` | `true` | 开启时新评论先经违禁词库机审（词库见 §2.9）：命中 `reject` 词直接拒绝，命中 `pending` 词落待审，未命中直接 `approved`；**关闭时一律直接 `approved`，机审整个跳过**——包括 `reject` 词，这个开关是机审与人工审核的总闸 |
 | `registration_enabled` | `true` | 关闭时注册接口直接拒绝，**已在注册逻辑最前处校验** |
 
-新增**开关**的先例即扩展这张表的键，不新建配置表。但这张表只承载「一个值」型配置（开关、短文案），**不承载需要逐条管理的内容数据**：违禁词曾以 `banned_words` 键寄居于此，2026-10-03 起独立为 `banned_words` 表（§2.9、db-design.md §2.10/§2.12），旧键与其值一并删除、**不做迁移**。分界口径写在 db-design.md §6。
+新增**开关**的先例即扩展这张表的键，不新建配置表。但这张表只承载「一个值」型配置（开关、短文案），**不承载需要逐条管理的内容数据**——逐条管理的内容落独立表，违禁词库 `banned_words` 即按此分界独立成表（§2.9）。分界口径写在 db-design.md §6。
 
 ### 2.7 存在但当前无读写链路的实体（重要）
 
-**本节当前是空集。** 原先列在本节的两张预留表位，`visit_logs` 已于 2026-10-03 建成完整读写链路并移出（§2.11）；`seo_meta` 同日先被建成、随后又随手动 SEO 链路一并下线删除（§2.10、`db-design.md` §2.8），因此它既不在本节、也不在库里。`likes`、`follows` 更早就各自随能力启用（§4.5、§4.7）。
+**本节当前是空集。**
 
 **处理约定**（对将来新增的表位同样有效）：`schema.sql` 里有表、而全仓没有任何 Mapper / XML SQL / 调用方读写它，就记进本节并写明真实状态；条目**只随真正启用而移出**，不因「准备要做」而移出。启用哪一个就先为它建完整链路，**不要顺手扩展另外一个**。
 
@@ -143,26 +135,23 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 - 词库量小、读多写极少，机审侧走**进程内缓存**，任何写操作（添加 / 批量导入 / 启停 / 删除）后整体失效重载（§4.4 第 2 条、db-design.md §2.12）。缓存不跨实例，这是单实例部署假设的一部分（§5.7 第 5 条）；多实例须改共享缓存或退回每次查库。
 - 后台可**批量导入**：请求体是原始文本，按换行 + 中英文逗号（`,`、`，`）拆分，逐项 trim、丢弃空项、去重，返回 `{ added, skipped }`。`skipped` 合并「本次文本内重复」与「词库里已有」两种情况、**不区分**——导入方只需知道有多少没进去。导入省略 `action` 时全部按默认 `pending`。
 
-### 2.10 SEO 元信息（服务端合成；`seo_meta` 表与手动编辑链路已于 2026-10-03 下线删除）
+### 2.10 SEO 元信息（服务端合成）
 
 详情页对外声明的三个值全部在响应时现算，库里既没有可填的 SEO 行、也没有那张 1:1 补充表（库侧记录见 `db-design.md` §2.8）：
 
 | 对外值 | 合成规则 | 落点 |
 |---|---|---|
 | SEO 标题 | `文章标题 - 站点名`，站点名取 `site_settings.site_name`（§2.6，与前台标题后缀同源） | 详情响应 `seoTitle`，即 `document.title` |
-| SEO 描述 | `posts.excerpt`——2026-10-03 起它是正文的派生物（§2.3、§4.2 第 6 条）；摘要为空就是空，不写占位文案 | `seoDescription` |
+| SEO 描述 | `posts.excerpt`——它是正文的派生物（§2.3、§4.2 第 6 条）；摘要为空就是空，不写占位文案 | `seoDescription` |
 | SEO 关键词 | 该文章标签名按 `, ` 拼接；无标签即为空，不写占位文案 | `seoKeywords` |
 
 合成不查库，所以同一篇文章任何时候都得到同一份值；描述那一路的稳定性来自摘要何时冻结，不来自这里。**只有公开详情接口带这三列**，列表与热榜不带——与 `content` 同一条理由（§3.1「文章列表与详情」）。
 
-**本轮删掉的东西**（裁决：摘要全自动、对齐掘金/知乎/Medium 的「作者界面无摘要输入框」，手动 SEO 面一并下线）：`seo_meta` 表；`POST/PUT /articles` 的三个可选入参与「三者都不带即不动该行」那套写入规则；`GET /articles/{id}/seo` 原文回显端点（连同 §5.5 过滤链里为它单排的那条鉴权）；编辑器的「SEO 设置」折叠段；后台文章列表的 `seoConfigured` 列、`GET /admin/seo-meta/missing` 与「待补全 SEO」筛选。后台那条清单删得彻底的理由：手动录入面消失后，「哪篇还没填 SEO」这个问题没有主语——摘要由服务端在发布时派生、发布即有，谁对这张清单都没有可执行的动作。
+**没有手动 SEO 面**：`seo_meta` 表、创建与更新的 SEO 入参、原文回显端点、编辑器的「SEO 设置」折叠段、后台文章列表的「SEO」列与「待补全 SEO」筛选都不存在，也不要重建——摘要由服务端在发布时派生、发布即有，「哪篇还没填 SEO」这个问题没有主语，谁对这张清单都没有可执行的动作。
 
-**留下的局限**：本站是无服务端渲染的单页应用，运行时写入的 meta 只有会执行 JS 的爬虫读得到（§6）。
+**已知局限**：本站是无服务端渲染的 Vue SPA，运行时写入的 meta 要等浏览器执行完 JS 才进 head。会渲染 JS 的爬虫（Google）读得到；百度与社交卡片爬虫不渲染 JS，拿不到这些 meta，OG 标签同理。SSR / 预渲染不在范围（§6）。
 
-**已知局限**：本站是无服务端渲染的 Vue SPA，这三项要等浏览器执行完 JS 才写进 head。会渲染 JS 的爬虫（Google）读得到；百度与社交卡片爬虫不渲染 JS，拿不到这些 meta，OG 标签同理。SSR / 预渲染不在范围（§6）。
-
-
-### 2.11 VisitLog（访问日志，2026-10-03 启用）
+### 2.11 VisitLog（访问日志）
 
 `visit_logs` 一行 = **一次被认定的文章访问**。列与类型以 `db-design.md` §2.9 为字段级真源；`created_at` 走库默认值，应用层不赋值。**这张表只服务后台分析，不参与任何前台展示与排序。**
 
@@ -175,7 +164,7 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 | 写失败 | 只记一条 error 日志。**绝不影响详情接口**：日志是旁路，宁缺一行也不能让文章页跟着失败 |
 | 保留期 | 180 天。由 `LogRetentionService` 每天 03:30 删超期行（Spring 自带 `@Scheduled`，属 §5.7 第 5 条允许的内建能力）；后续登录日志的清理并入同一个任务，不再各起一张调度表 |
 
-**与 `view_count` 的关系（易错点）**：`view_count` 依旧是列表、排序、详情展示的真源（db-design.md §1.7 不变），**禁止用本表回算或矫正它**。窗口首访那一刻两者各推进一次，所以「本表行数 ≈ 阅读增量」在对账意义上成立；但它不是真源，有三处必然对不上——超保留期的行已被删掉、异步写失败的行根本没落库、**被判为 bot 的访问照样进 `view_count` 却不进本表**（阅读量口径自始不看 UA，§5.6，本次不动它）。要做「校正阅读数」一类的功能，先推翻本条再动代码。
+**与 `view_count` 的关系（易错点）**：`view_count` 依旧是列表、排序、详情展示的真源（db-design.md §1.7 不变），**禁止用本表回算或矫正它**。窗口首访那一刻两者各推进一次，所以「本表行数 ≈ 阅读增量」在对账意义上成立；但它不是真源，有两处必然对不上——超保留期的行已被删掉、异步写失败的行根本没落库。bot（含空 UA）两侧都不进：不推 `view_count` 也不写本表（`ArticleService` 计数判据与 `VisitLogService` 写入前置各一道 `isBot` 判定）。要做「校正阅读数」一类的功能，先推翻本条再动代码。
 
 **消费端**：后台「日志管理」→ 访问日志页签（`/admin/logs/visits`），仅博主可达。概览四卡、趋势柱、三个 Top 榜共用同一时间窗口、一次返回（分开请求就会拿到两份对不上的数），明细另有三个可组合筛选。以下三条是这一页的成立条件，不是建议：
 
@@ -185,7 +174,7 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 
 **明确不做**：实时访客、地理归属、完整设备解析、回访识别、前端埋点、导出、BI 看板（§6）。这一页能回答的上限就是「近 180 天里，哪些文章、哪些网段、哪几类 UA 被访问了多少次」。
 
-### 2.12 LoginLog（登录日志，2026-10-03 启用）
+### 2.12 LoginLog（登录日志）
 
 `login_logs` 一行 = **一次登录尝试**，四种结局之一。列与类型以 `db-design.md` §2.13 为字段级真源；`created_at` 走库默认值。**这张表只服务后台安全面，不参与任何前台展示。**
 
@@ -199,12 +188,12 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 | 写失败 | 只记一条 error 日志。**绝不影响登录接口**：日志库挂了也不该让一次口令错误变成 500，更不该改口提示 |
 | 保留期 | 180 天，并入 §2.11 那条 `LogRetentionService` 的同一任务，不另起调度表 |
 
-**锁定策略（后台可调，2026-10-03 起）**：计数键仍是 `auth:login-fail:{email}:{客户端地址}`（结构不变），但两个参数搬到 `site_settings`——`login_max_failures`（默认 5，合法 3–10）、`login_lock_minutes`（默认 15，合法 5–60）。四条口径都是有意选的，不要「顺手」改：
+**锁定策略（后台可调）**：计数键是 `auth:login-fail:{email}:{客户端地址}`，两个参数放在 `site_settings`——`login_max_failures`（默认 5，合法 3–10）、`login_lock_minutes`（默认 15，合法 5–60）。四条口径都是有意选的，不要「顺手」改：
 
 1. **读取夹紧、保存拒绝**。库里可能被手改成 999 或 0：登录链路读到时夹回区间内（一个脏值不该把登录接口顶成 500，也不该等于「不锁」），而后台保存越界直接 400（保存是明确动作，把 120 分钟悄悄改成 60 会让人以为没生效）。
 2. **`login()` 进入时读一次并向下传**，不在每个分支各查一遍。
 3. **改动只影响之后新开的计数窗口**，已锁定键的剩余 TTL 不变——锁已经上了再改时长，不该把人提前放出来。
-4. **锁定提示按计数键剩余 TTL 算分钟数并向上取整**，不再写死「15 分钟」：报 0 分钟等于说没锁。
+4. **锁定提示按计数键剩余 TTL 算分钟数并向上取整**，不写死「15 分钟」：报 0 分钟等于说没锁。
 
 **消费端**：后台「日志管理」→ 登录日志页签（`/admin/logs/login`），仅博主可达。四个区块：锁定策略卡（含生效时机与合法范围说明）、概览三卡（今日失败 / 今日锁定 / 近一小时失败来源，按「邮箱 + 来源地址」去重）、攻击 Top 榜（按上述组合聚合的前 10，次数条是纯 CSS，不引图表库）、明细分页（时间 / 邮箱 / 来源地址前缀 / 结果四个筛选可任意组合）。脱敏与 UA 七类标签**与访问日志同一套公共件、同一口径**（§2.11 消费端第 1、2 条），两个页签对同一个 UA 串的归类必须一致。
 
@@ -222,7 +211,7 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 |---|---|---|
 | 注册 / 登录 | 邮箱验证码注册 + 口令登录，签发 JWT | 已实现 |
 | 文章写作 | Markdown 编辑、插图与封面上传、30s 静默自动保存 | 已实现（草稿免分类；发布与定时发布要求已选分类，前后端双重强制） |
-| 文章生命周期 | 草稿 / 立即发布 / 定时发布三态与状态机 | 已实现（调度器每分钟扫描到期 `scheduled` 行，见 §3.2「定时发布执行」；`published_at` 各流转语义见 §4.2） |
+| 文章生命周期 | 草稿 / 立即发布 / 定时发布 / 下线四态与状态机 | 已实现（调度器每分钟扫描到期 `scheduled` 行，见 §3.2「定时发布执行」；`published_at` 各流转语义见 §4.2） |
 | 内容可见性控制 | 非 `published` 内容对匿名拒绝、对作者与博主放行 | 已实现 |
 | 文章列表与详情 | 分页 + 按分类/标签/关键词筛选 + 阅读态取正文 | 已实现（**正文只由详情接口取**：列表、搜索、热榜、草稿箱、「我的文章」、后台列表都走不含 `content` 列的取列清单，见 `db-design.md` §5.2 与 §4.1） |
 | 分类 / 标签浏览 | 列出分类及其文章数（公开口径仅 `published`，见 §2.4）、按标签浏览（文章头与列表行的标签链接进入标签筛选） | 已实现 |
@@ -235,41 +224,41 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 | 个人资料维护 | 修改昵称、简介、头像 | 已实现 |
 | 站点开关管理 | 后台读写两个开关 | 已实现 |
 
-**历史缺口已清零**：评论的前端接线（api 层函数 + 详情页取数与提交）与点赞接线均已补齐，§5.3 第 5 条所述「演示假数据 / 本地自增」两类违规已不存在；现状列不再保留「假实现」项。
+**假实现**目前为零：评论与点赞的前端接线均已接通真实链路，现状列不再保留「假实现」项。
 
 ### 3.2 P1 — 闭环与运营必需
 
 | 功能 | 语义 | 现状 |
 |---|---|---|
-| 定时发布执行 | `scheduled` 文章到点自动转 `published` | 已实现（`ScheduledPublishService` 每分钟第 0 秒扫描，SQL 谓词 `status='scheduled' AND published_at <= NOW()` 自带幂等；`published_at IS NULL` 的存量行按三值逻辑不命中，需人工处理，不由调度器兜底。创建与更新接口均接收 `publishTime`，格式 `yyyy-MM-dd HH:mm:ss`） |
+| 定时发布执行 | `scheduled` 文章到点自动转 `published` | 已实现（`ScheduledPublishService` 每分钟第 0 秒扫描，SQL 谓词 `status='scheduled' AND published_at <= NOW()` 自带幂等。**这里的 `NOW()` 不是漏改**：`published_at` 是 `TIMESTAMP` 列，MySQL 读写都按**会话时区**换算，`NOW()` 取的也是同一个会话钟，两者天然同基；会话由连接串显式钉成 +08:00（`connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true`，实际值由 `DataSourceTimeZoneTest` 断言），所以到点发放不跟着数据库主机漂。反过来把它换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00')` 会打破这个对称：会话一旦不是 +08，列值跟着漂而写死的基准不漂，谓词就凭空差 8 小时。`published_at IS NULL` 的存量行按三值逻辑不命中，需人工处理，不由调度器兜底。创建与更新接口均接收 `publishTime`，格式 `yyyy-MM-dd HH:mm:ss`） |
 | 用户启停 | 博主禁用/恢复读者账号，即时生效 | 已实现（含保护：不允许禁用管理员、不允许禁用当前登录账号） |
-| 文章删除路径一致性 | 所有删除文章的路径共用同一个级联实现（§5.7 第 7 条） | 已实现（级联唯一实现在 `ArticleService` 内部：`cascadeDelete` 按 `post_tags` → `likes` → `comments` → `posts` 顺序先删子行再删主行；`deletePost`（前台/后台共用，后台 `AdminArticleService.deleteArticle` 委托它）、`deleteDraft`、`clearDrafts` 三条路径都复用它。`deleteDraft` 先经 SQL 属主谓词（`id + author_id + 状态为草稿/定时`）确认，再进级联。`comments` 按 `post_id` 整体删，根评论与其回复一并清理。`seo_meta` 曾在 2026-10-03 并入这一顺序，同日随该表下线一并撤出） |
+| 文章删除路径一致性 | 所有删除文章的路径共用同一个级联实现（§5.7 第 7 条） | 已实现（级联唯一实现在 `ArticleService` 内部：`cascadeDelete` 按 `post_tags` → `likes` → `comments` → `posts` 顺序先删子行再删主行；`deletePost`（前台/后台共用，后台 `AdminArticleService.deleteArticle` 委托它）、`deleteDraft`、`clearDrafts` 三条路径都复用它。`deleteDraft` 先经 SQL 属主谓词（`id + author_id + 状态为草稿/定时`）确认，再进级联。`comments` 按 `post_id` 整体删，根评论与其回复一并清理。被删文章的封面与正文配图随级联进入对象回收（§3.3「图片对象回收」）） |
 | 草稿箱 | 列出自己的草稿与定时文章、单条删除、一键清空 | 已实现（单条删除与清空都走 §5.7 第 7 条的级联实现，不遗留子行孤儿；属主校验在 SQL 谓词内） |
-| 站内搜索 | 关键词命中标题或正文 | 已实现（复用列表接口。2026-10-03 起按关键词长度分岔：满 2 字走 `posts` 上 `title+content` 的 ngram 全文索引（`MATCH…AGAINST` 布尔模式，关键词整体加引号当短语、内嵌双引号被摘掉，避免 `+ - * " ( )` 被解释成运算符），单字退回 `LIKE`——ngram 词元就是两个字符，单字进不了索引。索引决策与代价见 `db-design.md` §4.1/§4.3/§4.4；索引随 `docs/schema.sql` 的 `posts` 建表语句一并建立，库里缺它时满 2 字的搜索会报 1191） |
-| 阅读量统计 | 详情访问计数并在列表/详情展示 | 已实现（**口径为「已发布文章 + 访问者小时窗口去重」**，见 §4.3 第 3 条与 §5.6；键位细则见 `db-design.md` §5.2） |
+| 站内搜索 | 关键词命中标题或正文 | 已实现（复用列表接口。按关键词长度分岔：满 2 字走 `posts` 上 `title+content` 的 ngram 全文索引（`MATCH…AGAINST` 布尔模式，关键词整体加引号当短语、内嵌双引号被摘掉，避免 `+ - * " ( )` 被解释成运算符），单字退回 `LIKE`——ngram 词元就是两个字符，单字进不了索引。索引决策与代价见 `db-design.md` §4.1/§4.3/§4.4；索引随 `docs/schema.sql` 的 `posts` 建表语句一并建立，库里缺它时满 2 字的搜索会报 1191） |
+| 阅读量统计 | 详情访问计数并在列表/详情展示 | 已实现（**口径为「已发布文章 + 访问者小时窗口去重」**，未发布内容与 bot 不计，见 §4.3 第 3 条与 §5.6；键位细则见 `db-design.md` §5.2） |
 | 热门文章 | 按加权热度分倒序取前 N | 已实现（热度分 =（阅读 + 赞×3 + 评×5）÷ 引力衰减，见 §3.2「排序参数」的 `popular` 口径） |
 | 后台概览 | 用户数 / 文章数 / 待审评论数 / 总阅读量 / 最近动态 | 已实现 |
-| 访问统计 | 后台看文章访问的概览、趋势、Top 榜与明细 | 已实现（2026-10-03 启用。写入挂在详情页的阅读量判据上、`@Async` 落库，bot 不写，保留 180 天，规则见 §2.11；入口是「日志管理 → 访问日志」，仅博主可达；**完整 IP 不出现在任何响应里**（后端脱敏成 `112.10.*.*`）、UA 只出七类粗标签、趋势是纯 CSS 柱子不引图表库；`view_count` 仍是前台真源，不用这张表回算） |
-| 登录日志与安全策略 | 后台看登录成败与爆破尝试，并可就地调锁定阈值 | 已实现（2026-10-03 启用。`AuthService.login()` 的四个出口各异步写一行 `login_logs`，写失败只记 error 不影响登录；保留 180 天，并入 §2.11 那条清理任务；入口是「日志管理 → 登录日志」，仅博主可达；**完整 IP 不出现在任何响应里**、UA 与访问日志共用同一套七类标签；锁定的次数与时长改为 `site_settings` 两键，默认 5 次 / 15 分钟、合法 3–10 次与 5–60 分钟，读取夹紧、保存越界回 400，**改动只影响之后新开的计数窗口**，规则见 §2.12） |
-| 排序参数 | 列表排序口径唯一 | 已实现（`PostMapper.findAllBrief` 的 `<choose>` 里三个分支，取值集合就是 `latest` / `recommended` / `popular`，无 `hottest` 别名。`popular` = 侧栏热榜（`/articles/hot`）**独占**，按**加权热度分**纯热度倒序、不因置顶改位次——`(COALESCE(view_count,0) + COALESCE(like_count,0)×3 + COALESCE(comment_count,0)×5) ÷ POW(DATEDIFF(NOW(), COALESCE(published_at, created_at)) + 2, 0.6)`，权重与衰减指数内联在 SQL 常量里**不做配置化**；衰减基准优先 `published_at`、空值回退 `created_at`；`GREATEST(…, 2)` 的钳位不可省——提前手工发布的存量行带着未来时刻，负底数会让 `POW` 抛 1690 打断整条查询。热度公式抽为 `<sql id="heatScore">`，被 `popular` 与 `recommended` 两个分支 include，**全仓只有一份**，不要另拆一条 SQL。`latest` = **后端缺省**：`is_top DESC, top_order DESC, published_at DESC, id DESC`——置顶优先，同为置顶的按权重从大到小，再按发布时间倒序（`published_at` 为 NULL 的存量行沉底）；搜索页与作者主页不传 sort 走的就是它，**缺省值不得改动**。`recommended` = 首页「推荐」tab：`is_top DESC, top_order DESC, 热度分 DESC, id DESC`——置顶是编辑推荐、不与热度分竞争位次，非置顶部分按热度倒序。前端 URL 约定：**无 `sort` 参数即「推荐」**（`HomeView` 显式传 `recommended`，不占用后端缺省语义），`?sort=latest` 才是「最新」。`popular` 由 `ArticleService.getHotArticles` 单页取回、不翻页，故不补 id 尾键；另两个分支末位的 `p.id DESC` 是全序尾键、不可省——冷文互动全为 0 时分数必然并列，缺它 `PageHelper` 的 `LIMIT/OFFSET` 会在并列行之间重复或漏取，滚动加载就表现为「同一篇出现两次」。前端列表参数类型只含 `latest` / `recommended`，**不含 `popular`**，不得把它扩给列表 tab。非法或缺省取值静默按 `latest` 处理，属既有兜底行为；`@Schema` 描述已写清三个合法值与该回落） |
-| 验证码与注册的防刷 | 发码频率上限、失败次数锁定 | 已实现（2026-10-03 补齐失败计数那一半）。**发码频率上限**：`VerificationCodeService` 在生成验证码**之前**先查两道频控，注册、改邮箱、重置口令三个入口都生效——`auth:code-limit:{purpose}:{email}`（TTL 60s，同邮箱同用途 60 秒内只发一次）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00，每日上限 10 次），`purpose` 取 `registration` / `email-change` / `password-reset`；超限抛业务异常「发送过于频繁，请稍后再试」→ 400，且被限流时不消耗验证码与邮件。**校验防穷举**：`auth:code-try:{purpose}:{email}` 按用途分键计数，首错设 TTL 5min（与码同寿），错满 5 次连带删掉码值键并改口提示「验证码错误次数过多，请重新获取」；校验成功即清计数；**没发过码或码已过期时不计失败**，免得未发码的邮箱被预先扣光额度。**登录防爆破**：`auth:login-fail:{email}:{客户端地址}` 双维度 `INCR`，默认满 5 次锁定 15 分钟（这两个值 2026-10-03 起后台可调，键位、区间与生效时机见 §2.12），锁定期间不再校验口令也不给「邮箱存在与否」的差异反馈；口令错仍回 401（`BadCredentialsException` 的全局处理不动），只有锁定这条提示回 400；登录成功清键。**这四次结局各写一行 `login_logs`（§2.12）**。来源地址与阅读去重共用 `IpUtils.clientIp()`，不是硬保证（`X-Forwarded-For` 客户端可控）。**注册入参门槛**：`RegisterRequest` 声明口令 8-72 位（72 是 BCrypt 截断边界）、用户名 2-30 位且只允许中文/字母/数字/下划线/中划线、邮箱 ≤255（对齐列宽），中文提示由 `MethodArgumentNotValidException` 处理器原样带回 400。键位汇总见 `db-design.md` §5.4 |
-| SEO 元数据 | 详情页 title/description/keywords 由服务端按回落链**合成**（规则见 §2.10） | 已实现（合成不查库：`文章标题 - 站点名` / `posts.excerpt` / 标签名拼接，只有公开详情带这三列；前台 `src/utils/seo.ts` 在路由切换时复位并重写 meta。**已于 2026-10-03 下线**：`seo_meta` 表、创建与更新的三个可选入参、原文回显端点、编辑器的「SEO 设置」段、后台的 `seoConfigured` 列与待补全清单。**局限**：SPA 无 SSR，只惠及会执行 JS 的爬虫，见 §2.10 末段与 §6） |
-| 爬虫直读产物 | `robots.txt` / `sitemap.xml` / `feed.xml` 由后端直出，不依赖浏览器执行 JS | 已实现（2026-10-03。`SeoPublicController` 三个 GET 端点按精确路径匿名放行（§5.5），`SeoPublicService` 手拼 XML 并转义，**不引模板引擎也不引 RSS 库**。sitemap = 首页 + 全部 `published` 文章详情，`lastmod` 取 `posts.updated_at` 的 ISO 8601 带时区偏移（时刻为空的行省掉该元素，不留空标签）；分类与标签是查询参数路由，按 sitemaps.org 惯例不申报。RSS 2.0 = 最新 20 篇按 `published_at` 倒序（存量无时刻行回落 `created_at`，与 §3.2 热度衰减同一条口径），`description` 用 CDATA 包裹服务端派生的摘要，channel 描述取 `site_settings.about_lead`（同一句话不在第三处重抄）。绝对地址由 `site_settings.site_url` 拼，未配置按当次请求 Host 兜底。**这三份产物落在 `context-path=/api/v1` 之下，域名根的可达性靠反向代理精确映射，写法见 README「SEO 产物与反向代理」**） |
+| 访问统计 | 后台看文章访问的概览、趋势、Top 榜与明细 | 已实现（写入挂在详情页的阅读量判据上、`@Async` 落库，bot 不写，保留 180 天，规则见 §2.11；入口是「日志管理 → 访问日志」，仅博主可达；**完整 IP 不出现在任何响应里**（后端脱敏成 `112.10.*.*`）、UA 只出七类粗标签、趋势是纯 CSS 柱子不引图表库；`view_count` 仍是前台真源，不用这张表回算） |
+| 登录日志与安全策略 | 后台看登录成败与爆破尝试，并可就地调锁定阈值 | 已实现（`AuthService.login()` 的四个出口各异步写一行 `login_logs`，写失败只记 error 不影响登录；保留 180 天，并入 §2.11 那条清理任务；入口是「日志管理 → 登录日志」，仅博主可达；**完整 IP 不出现在任何响应里**、UA 与访问日志共用同一套七类标签；锁定的次数与时长走 `site_settings` 两键，默认 5 次 / 15 分钟、合法 3–10 次与 5–60 分钟，读取夹紧、保存越界回 400，**改动只影响之后新开的计数窗口**，规则见 §2.12） |
+| 排序参数 | 列表排序口径唯一 | 已实现（`PostMapper.findAllBrief` 的 `<choose>` 里三个分支，取值集合就是 `latest` / `recommended` / `popular`，无 `hottest` 别名。`popular` = 侧栏热榜（`/articles/hot`）**独占**，按**加权热度分**纯热度倒序、不因置顶改位次——`(COALESCE(view_count,0) + COALESCE(like_count,0)×3 + COALESCE(comment_count,0)×5) ÷ POW(DATEDIFF(NOW(), COALESCE(published_at, created_at)) + 2, 0.6)`，权重与衰减指数内联在 SQL 常量里**不做配置化**；衰减基准优先 `published_at`、空值回退 `created_at`；**这里的 `NOW()` 是对的不是漏改**——两列都是 `TIMESTAMP`，MySQL 读写都按**会话时区**换算，`NOW()` 也在同一会话里取，天然与列值同基；会话由连接串显式钉成 +08:00（`db-design.md` §1，实际值由 `DataSourceTimeZoneTest` 断言），所以它不跟着数据库主机漂。写成 `CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00')` 那种「显式基准」反而破坏对称：会话一旦不是 +08，列值跟着漂而写死的基准不漂，衰减天数就凭空多/少一天；`GREATEST(…, 2)` 的钳位不可省——提前手工发布的存量行带着未来时刻，负底数会让 `POW` 抛 1690 打断整条查询。热度公式抽为 `<sql id="heatScore">`，被 `popular` 与 `recommended` 两个分支 include，**全仓只有一份**，不要另拆一条 SQL。`latest` = **后端缺省**：`is_top DESC, top_order DESC, published_at DESC, id DESC`——置顶优先，同为置顶的按权重从大到小，再按发布时间倒序（`published_at` 为 NULL 的存量行沉底）；搜索页与作者主页不传 sort 走的就是它，**缺省值不得改动**。`recommended` = 首页「推荐」tab：`is_top DESC, top_order DESC, 热度分 DESC, id DESC`——置顶是编辑推荐、不与热度分竞争位次，非置顶部分按热度倒序。前端 URL 约定：**无 `sort` 参数即「推荐」**（`HomeView` 显式传 `recommended`，不占用后端缺省语义），`?sort=latest` 才是「最新」。`popular` 由 `ArticleService.getHotArticles` 单页取回、不翻页，故不补 id 尾键；另两个分支末位的 `p.id DESC` 是全序尾键、不可省——冷文互动全为 0 时分数必然并列，缺它 `PageHelper` 的 `LIMIT/OFFSET` 会在并列行之间重复或漏取，滚动加载就表现为「同一篇出现两次」。前端列表参数类型只含 `latest` / `recommended`，**不含 `popular`**，不得把它扩给列表 tab。非法或缺省取值静默按 `latest` 处理，属既有兜底行为；`@Schema` 描述已写清三个合法值与该回落） |
+| 验证码与注册的防刷 | 发码频率上限、失败次数锁定 | 已实现。**发码频率上限**：`VerificationCodeService` 在生成验证码**之前**先查两道频控，注册、改邮箱、重置口令三个入口都生效——`auth:code-limit:{purpose}:{email}`（TTL 60s，同邮箱同用途 60 秒内只发一次）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00，每日上限 10 次），`purpose` 取 `registration` / `email-change` / `password-reset`；另有两层兜底日额度：`auth:code-ip-daily:{客户端地址}`（每来源地址每日 30 次）与 `auth:code-global-daily`（全站每日 500 次），堵「持邮箱列表绕开邮箱维度」的邮件轰炸中继。所有含 `{email}` 的键一律以 trim + 转小写后的归一化邮箱分键（库表是 ci 排序规则，键不归一，大小写变体就各领一套额度、两层锁定可被绕开）。超限抛业务异常（「发送过于频繁，请稍后再试」或「今日发送次数已达上限，请明日再试」）→ 400，且被限流时不消耗验证码与邮件。**发码防枚举**：找回密码的发码对未注册邮箱**静默跳过**（响应一律成功、不投递）；重置口令对未注册邮箱报「验证码错误或已过期」，不区分「码错」与「邮箱未注册」；注册链路的「该邮箱已被注册」是表单必要反馈，保留。**校验防穷举**：`auth:code-try:{purpose}:{email}` 按用途分键计数，首错设 TTL 5min（与码同寿），错满 5 次连带删掉码值键并改口提示「验证码错误次数过多，请重新获取」；校验成功即清计数；**没发过码或码已过期时不计失败**，免得未发码的邮箱被预先扣光额度。**登录防爆破**：`auth:login-fail:{email}:{客户端地址}` 双维度 `INCR`，默认满 5 次锁定 15 分钟（这两个值后台可调，键位、区间与生效时机见 §2.12），锁定期间不再校验口令也不给「邮箱存在与否」的差异反馈；口令错仍回 401（`BadCredentialsException` 的全局处理不动），只有锁定这条提示回 400；登录成功清键。**这四次结局各写一行 `login_logs`（§2.12）**。来源地址与阅读去重共用 `IpUtils.clientIp()`，不是硬保证（`X-Forwarded-For` 客户端可控）。**注册入参门槛**：`RegisterRequest` 声明口令 8-72 位（72 是 BCrypt 截断边界）、用户名 2-30 位且只允许中文/字母/数字/下划线/中划线、邮箱 ≤255（对齐列宽），中文提示由 `MethodArgumentNotValidException` 处理器原样带回 400。键位汇总见 `db-design.md` §5.4 |
+| SEO 元数据 | 详情页 title/description/keywords 由服务端按回落链**合成**（规则见 §2.10） | 已实现（合成不查库：`文章标题 - 站点名` / `posts.excerpt` / 标签名拼接，只有公开详情带这三列；前台 `src/utils/seo.ts` 在路由切换时复位并重写 meta。**没有手动 SEO 面**：`seo_meta` 表、创建与更新的三个可选入参、原文回显端点、编辑器的「SEO 设置」段、后台的 `seoConfigured` 列与待补全清单均不存在，不要重建（§2.10）。**局限**：SPA 无 SSR，只惠及会执行 JS 的爬虫，见 §2.10 末段与 §6） |
+| 爬虫直读产物 | `robots.txt` / `sitemap.xml` / `feed.xml` 由后端直出，不依赖浏览器执行 JS | 已实现（`SeoPublicController` 三个 GET 端点按精确路径匿名放行（§5.5），`SeoPublicService` 手拼 XML 并转义，**不引模板引擎也不引 RSS 库**。sitemap = 首页 + 全部 `published` 文章详情，`lastmod` 取 `posts.updated_at` 的 ISO 8601 带时区偏移（时刻为空的行省掉该元素，不留空标签）；分类与标签是查询参数路由，按 sitemaps.org 惯例不申报。RSS 2.0 = 最新 20 篇按 `published_at` 倒序（存量无时刻行回落 `created_at`，与 §3.2 热度衰减同一条口径），`description` 用 CDATA 包裹服务端派生的摘要，channel 描述取 `site_settings.about_lead`（同一句话不在第三处重抄）。绝对地址由 `site_settings.site_url` 拼，未配置按当次请求 Host 兜底。**这三份产物落在 `context-path=/api/v1` 之下，域名根的可达性靠反向代理精确映射，写法见 README「SEO 产物与反向代理」**） |
 | 前台辅助界面 | 关于页（文案后台可配，见下）、发布成功页、深浅色主题切换（本地偏好）、首页统计卡（文章总数/分类数/最近更新）、热门列表「换一换」 | 已实现（关于页文案已后端化：`site_settings` 的 `about_*` 四键 + 公开读取 `GET /site/about` + 后台编辑 `PUT /admin/about-content`，未配置项回落内置默认文案） |
 | 关注作者 | 登录读者对文章作者的单向表态，可取消，同一人对同一作者只有一条关系 | 已实现（实体见 §2.8，流程见 §4.7；**只出计数、按钮状态与个人主页列表，不驱动分发与通知**，边界见 §6） |
-| 关注 / 粉丝列表 | 个人主页内展示「我关注的」「关注我的」两个列表，仅本人可见，列表内可直接取关 | 已实现（`GET /user/following`、`GET /user/followers`，属主只取登录态；2026-10-02 按主流设计由「不做」清单转正，见 §6） |
-| 我点赞的文章 | 个人主页内展示本人点赞过的已发布文章，按点赞时刻倒序 | 已实现（`GET /user/liked-posts`；2026-10-02 转正，见 §6） |
+| 关注 / 粉丝列表 | 个人主页内展示「我关注的」「关注我的」两个列表，仅本人可见，列表内可直接取关 | 已实现（`GET /user/following`、`GET /user/followers`，属主只取登录态，仅限本人视角，见 §6） |
+| 我点赞的文章 | 个人主页内展示本人点赞过的已发布文章，按点赞时刻倒序 | 已实现（`GET /user/liked-posts`，仅本人视角，见 §6） |
 
 ### 3.3 P2 — 明确排在后面
 
 | 功能 | 语义 | 现状 |
 |---|---|---|
 | 邮箱修改 | 校验当前口令 + 新邮箱验证码 + 唯一性后改绑 | 已实现（`PUT /user/email` + `POST /user/email/code`；成功后前端强制登出并跳登录页——JWT subject 是邮箱，旧 token 下一次请求即失效。落地即连带强制重新登录的约束已满足） |
-| 图片对象回收 | 更换头像/删除文章后清理旧对象 | 未实现（对象存储只有上传能力，无删除接口，旧对象永久残留） |
+| 图片对象回收 | 更换头像/删除文章后清理旧对象 | 已实现（自 §6「已排除的技术债」清偿转入，残留范围见 §6）。删除能力在 `ImageReclaimService`，覆盖两条链路：① `UserService.updateAvatar` 换下的旧头像；② `ArticleService.cascadeDelete`（`deletePost`/`deleteDraft`/`clearDrafts` 三条路径共用那一条级联）删掉的这篇文章的封面 + 正文 `![alt](url)` 里引用的图。四条口径：**提交之后才删**——回收排在事务的提交点之后（回滚了却已把对象删掉是唯一不可接受的错法），走 Spring 自带 `@Async`，与 §2.11 同一条约束「地址必须在请求线程上取好再传进去」；**宁可漏删、不可误删**——只有以 `minio.endpoint` + 桶名 + `/` 打头的地址才归本桶管，空值、第三方图床（存量头像里的 dicebear、正文里的外链图）、前端随发布的相对路径 `default-avatar.svg` 一律出局；**失败只记 error**——与 `visit_logs` 写失败同一条口径（§2.11），不影响主流程、不重试；**不做扫描**——全桶扫描与孤儿对象巡检仍在 §6 的「不做」清单里 |
 | 运维面收敛 | 生产环境收紧监控端点与接口文档 | 已实现（`SecurityConfig` 只放行 `/actuator/health`，其余 actuator 端点落到「其余一律要求登录」；Swagger 的 `/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` 三条放行规则按 `springdoc.api-docs.enabled` 条件装配。默认配置（dev）保持文档开放便于联调；`application-prod.yml` 关掉 `springdoc.api-docs.enabled` 与 `springdoc.swagger-ui.enabled`，并把 `management.endpoints.web.exposure.include` 收窄为 `health`。**注意**：未加 profile 时走默认配置，收紧只在以 `--spring.profiles.active=prod` 启动时生效） |
-| 自托管部署 | 容器化一键起 | 未实现（无 Dockerfile / 编排文件） |
-| 自动化测试 | 关键业务规则有回归保护 | 部分实现（后端有两组服务层单测，覆盖文章可见性与 `published_at` 规则、评论身份回填；**前端无任何测试设施与 test 脚本**；集成测试需外部 MySQL/Redis） |
-| 前端依赖治理 | 声明与实际一致 | 已实现（核对口径：**声明 = 源码实际引用 ∪ 构建期必需**。`nprogress` 曾长期只有声明、`src/` 零引用，是幽灵依赖；2026-10-02 按「补上引用」而非「删掉声明」收敛——接进路由守卫做导航进度条（语义见 ui-design §4.7），声明与引用现已一致。`@vueuse/core` 曾由后台设置页使用而未声明，现全仓同样零引用，**因此不新增声明**，不把它变成幽灵依赖。`sass` 在源码中零 import，但 27 处 `<style lang="scss">` 需要它在构建期存在，保留；其余依赖逐个核对过引用，全部有来源） |
+| 自托管部署 | 容器化一键起 | 已实现（`cloudlog_api/Dockerfile` 两阶段：`maven:3.9-eclipse-temurin-21` 打包 → `eclipse-temurin:21-jre-alpine` 非 root 运行，启动命令固定带 `--spring.profiles.active=prod`，`.dockerignore` 把不入库的 `application.yml` 挡在构建上下文之外，所以镜像里没有任何凭据；`cloudlog_web/Dockerfile` 两阶段：`node:22-alpine` 构建 → `nginx:1.28-alpine` 托管 `dist`，`cloudlog_web/nginx.conf` 落地那三条**域名根**精确映射（`location = /robots.txt` 等，口径见 §3.2 与 README）+ SPA `try_files` 回退 + `/api/v1` 反代；根目录 `docker-compose.yml` 一键起 MySQL 8.4 + Redis 7 + 后端 + 前端，健康检查齐备、`depends_on` 按 healthy 排队、`docs/schema.sql` 挂进 MySQL 的 initdb 目录，凭据只来自仓库根 `.env`（入库的只有 `.env.example` 模板）。**两处与 README 原文有差别**：① compose 拓扑里后端不是 `127.0.0.1:8080` 而是网络内的服务名 `api`，且 8080 不对外发布——nginx 是唯一入口、以覆盖方式写 `X-Forwarded-For`，因此容器档里 `app.security.trust-forwarded-for` 默认 true（前提被破坏时须改回 false，见 §5.5）；② 运行期配置 = 挂载的 `deploy/api/application-prod.yml` + `.env` 注入的环境变量，**不是全部走环境变量**：`pagehelper.params=count=countSql` 这类标量值经环境变量传入会绑不进 Map、启动即 `BindException`（本机以 Spring Boot 3.5.14 的 Binder 实测）。挂载文件与 jar 内同名文件是「同名叠加、只补不覆」，prod 的三项收紧照旧生效。JVM 时区在镜像里钉 `Asia/Shanghai`——评论频控、日志保留、SEO 产物三处仍按 JVM 默认时区取「现在」（§6 未决项），容器默认起在 UTC 会静默偏 8 小时。**MinIO 那一格受外部供给影响**：2026-09 起 MinIO 停发免费 Docker 镜像（实测 Docker Hub 的 `minio/minio`、`minio/mc` 已 404，`quay.io/minio/minio` 匿名拉取 401），故镜像名交 `.env` 的 `MINIO_IMAGE` 填、服务排在 `--profile images` 之后，桶的匿名只读策略仍是手工动作（§5.6 的匿名只读裁决不变）。单实例假设不变（§5.7 第 5 条）：不上 K8s、不做镜像仓库推送、不做多副本。验证：`deploy/verify-deploy.sh` 覆盖「注册 → 发文 → 详情可读 → 三份产物在域名根可达 → 清理容器与数据卷」；本轮交付所在机器**没有容器运行时，该脚本未实机跑过**（属性绑定与配置分层这两项风险已用本机 JDK 21 + Spring Boot 3.5.14 实测），首次在有 Docker 的机器上跑通即为验收） |
+| 自动化测试 | 关键业务规则有回归保护 | 部分实现（前端测试设施已建立，依赖放行见 §5.7 第 4 条例外）：`cloudlog_web/vitest.config.ts` + `npm run test`，16 项用例只测纯逻辑与一枚代表组件——`utils/seo.ts` 的 `toIso8601`（套件把运行时时区钉成 UTC，本机 +08 上「显式补 +08:00」与「按本地裸解析」本是同一瞬间，钉住后去掉锚定即红）与 `canonicalUrl`（剥掉查询参数）；`stores/article.ts` 的状态流转（定时文章从 `publishedAt` 恢复计划时刻、标签归一成 id、详情取数把 404 与 5xx 分别落成 `detailFailed` 的假与真）；`views/profile/ProfileFollowList.vue` 的「取消关注」（接口未答话前不摘行、接口失败既不报成功也不 `emit('changed')`、只有确认后才出现第二次取数）——§5.3 第 5 条「以服务端返回值为准、不做乐观更新」由此有了回归保护。最小面是刻意的：不发真实请求、不追覆盖率、没有端到端（Playwright / Cypress 未放行）。测试文件放 `src/**/__tests__/`，`tsconfig.app.json` 的 exclude 本就覆盖该目录，所以不进 `vue-tsc --build` 也不进构建产物，代价是测试文件自身不被类型检查。**仍未决的两处**：后端一侧是服务层与 Mapper 的若干测试类（逐轮 scoped 结果见 git 历史与附录 B）；集成测试需外部 MySQL/Redis；CI 的前端作业只跑 `npm run build`，`npm run test` 尚未接进流水线 |
+| 前端依赖治理 | 声明与实际一致 | 已实现（核对口径：**声明 = 源码实际引用 ∪ 构建期必需**。`nprogress` 接进路由守卫做导航进度条（语义见 ui-design §4.7），声明与引用一致；`@vueuse/core` 全仓零引用，**因此不新增声明**，不把它变成幽灵依赖；`sass` 在源码中零 import，但 27 处 `<style lang="scss">` 需要它在构建期存在，保留；其余依赖逐个核对过引用，全部有来源） |
 
 ---
 
@@ -288,23 +277,25 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 （新建 / 自动保存）→ draft
 draft → published     立即发布：published_at 为空时写入当前时刻（否则保持），要求已选分类
 draft → scheduled     定时发布：把计划时刻写入 published_at，要求非空且晚于当前、且已选分类；经更新接口把状态改为 scheduled 时同样要求计划时刻非空且晚于当前
-scheduled → published 调度器到点只改 status，published_at 沿用计划时刻
+scheduled → published 两条路径：调度器到点只改 status，published_at 沿用计划时刻；博主在到点前手工发布时（计划时刻还在未来）把 published_at 覆写为当前时刻，计划时刻已到的仍沿用
 scheduled → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `status`）撤下，published_at 显式清空
 published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `status`）改回（现状允许，但 published_at 不回退）
+published → offline   下线：经更新接口（`PUT /articles/{id}` 带 `status`）收回对外可见性，写 offlined_by / offlined_at 留痕，published_at 不变
+offline → published   重新上线：恢复可见，published_at 沿用首发时刻，摘要为空时按第 6 条补生成
 ```
 
-1. 编辑器要求标题与正文非空、且已选分类才允许发布或定时；自动保存 30 秒静默写入 draft。**草稿免分类已实现**：`categoryId` 仅在流转到 `published` / `scheduled` 时由服务层强制非空，创建与更新两条路径同口径，前端不再用默认分类兜底。
+1. 编辑器要求标题与正文非空、且已选分类才允许发布或定时；自动保存 30 秒静默写入 draft。**草稿免分类**：`categoryId` 仅在流转到 `published` / `scheduled` 时由服务层强制非空，创建与更新两条路径同口径，前端不再用默认分类兜底。
 2. 首次保存时文章 ID 由服务层以雪花 ID 生成并随创建响应回传（字符串形态），前端据此切换到「编辑既有文章」路径，之后走更新，避免重复插入草稿行。
-3. `published_at` 语义是**首次对外可见的时刻**：文章首次成为 `published` 之后不再变化；`scheduled` 期间它是可覆盖的计划时刻，`scheduled → draft` 时由服务层显式置空（通用 update 语句跳过 null，清空走独立 SQL）；更新时若状态转为 `published` 且该值为空才补写。定时文章在编辑器回显时由前端从 `publishedAt` 恢复计划时刻，改定时文章不必重选时间。
+3. `published_at` 语义是**首次对外可见的时刻**：文章首次成为 `published` 之后不再变化；`scheduled` 期间它是可覆盖的计划时刻，`scheduled → draft` 时由服务层显式置空（通用 update 语句跳过 null，清空走独立 SQL）；更新时若状态转为 `published` 且该值为空才补写。**唯一一处改写**：从 `scheduled` 手工流转到 `published` 且计划时刻仍晚于当前时，覆写为当前时刻——定时文章在到点前不对外可见，那个未来值从来不是「首次对外可见的时刻」，照原值落库会让前台显示「发布于未来」。判定挂在「从 `scheduled` 转入」这一次变迁上，因此调度器（批量 UPDATE、不经服务层）、计划时刻已到的定时文章、`offline → published` 的重新上线都拿不到改写，一律沿用既有时刻。定时文章在编辑器回显时由前端从 `publishedAt` 恢复计划时刻，改定时文章不必重选时间。
 4. 插图与封面在保存前先上传到对象存储，拿到的**完整 URL** 才被写入正文或封面字段。
-5. **未决语义**（不得擅自实现其中一种）：`scheduled` 的 `published_at` 存的是未来时刻；若博主在到点前手工改为 `published`，前台会显示「发布于未来」。是否改写为当前时刻，需产品裁决后再实现。
-6. **摘要在对外发布这一刻派生**（2026-10-03）：`excerpt` 不在创建与更新的入参里，服务端在**本次落库的目标状态**为 `published` / `scheduled` 且该列为空（或全空白）时，用 `ExcerptUtils.generate(content, 150)` 从 `content` 生成——去围栏与行内代码、图片整枚删、链接只留锚文本、去 HTML 标签与 Markdown 标记、连续空白折成单空格，最后按 Unicode 码点截断，只在真截断时补尾部省略号（省略号计入 150）。**已有值一律不重算**：已发布文章再改正文不改写摘要，列表那一行与详情页 description 才稳定不漂移；列在派生之后仍为空（下线过的存量文章）时，重新上线会补生成。`scheduled → published` 由调度器一条批量 `UPDATE` 完成、不经过服务层，所以摘要必须在进入 `scheduled` 时就已落库。`draft` 与转入 `offline` 永不生成。
+5. **定时文章未到点就被手工发布时，`published_at` 改写为当前时刻**（机制见第 3 条）：这条不是措辞偏好，是「首次对外可见的时刻」这个定义本身要求的——未来时刻进前台就是「发布于未来」，读者无从判断这篇到底看不看得到。掘金的定时文章提前发布、知乎的草稿直接发布都以实际公开时刻记账，与本条一致。三条不受影响的口径写在第 3 条末尾（调度器、已过计划时刻、重新上线），回归用例在 `ArticleServiceTest` 的 R13 与 `ScheduledPublishServiceTest`。
+6. **摘要在对外发布这一刻派生**：`excerpt` 不在创建与更新的入参里，服务端在**本次落库的目标状态**为 `published` / `scheduled` 且该列为空（或全空白）时，用 `ExcerptUtils.generate(content, 150)` 从 `content` 生成——去围栏与行内代码、图片整枚删、链接只留锚文本、去 HTML 标签与 Markdown 标记、连续空白折成单空格，最后按 Unicode 码点截断，只在真截断时补尾部省略号（省略号计入 150）。**已有值一律不重算**：已发布文章再改正文不改写摘要，列表那一行与详情页 description 才稳定不漂移；列在派生之后仍为空（下线过的存量文章）时，重新上线会补生成。`scheduled → published` 由调度器一条批量 `UPDATE` 完成、不经过服务层，所以摘要必须在进入 `scheduled` 时就已落库。`draft` 与转入 `offline` 永不生成。
 
 ### 4.3 阅读与可见性判定
 
 1. 列表接口只返回 `published` 内容。
-2. 详情接口取到文章后先判状态：为 `published` 直接放行；否则要求请求者已登录，且**是作者本人或博主**，不满足一律按「不存在」响应（不泄露资源是否存在）。
-3. 放行后累加阅读量，但**只认真实阅读**：未发布内容（作者与管理员预览草稿、定时文章）一律不计；已发布文章按访问者身份做小时窗口去重——登录用户按 `user:{id}`、匿名按 `ip:{地址}`，同一访问者 1 小时内反复刷同一篇只 +1。响应体的阅读量与本次是否真的自增一致，没自增就返回查库原值。
+2. 详情接口取到文章后先判状态：为 `published` 直接放行；否则（草稿 / 定时 / 已下线）要求请求者已登录，且**是作者本人或博主**，不满足一律按「不存在」响应（不泄露资源是否存在）。
+3. 放行后累加阅读量，但**只认真实阅读**：未发布内容（草稿、定时、已下线的预览）一律不计，bot（含空 UA）不计数；已发布文章按访问者身份做小时窗口去重——登录用户按 `user:{id}`、匿名按 `ip:{地址}`，同一访问者 1 小时内反复刷同一篇只 +1。响应体的阅读量与本次是否真的自增一致，没自增就返回查库原值。
 4. 内容可见性的唯一真源在服务端；前端「是否显示编辑入口」只是展示层判断。
 
 ### 4.4 评论与审核
@@ -317,10 +308,10 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
    - 开启且未命中 `reject` 词、但命中任一 `action='pending'` 的启用词 → `pending`，**不计数**，等博主裁决，同时把**首个命中的 `pending` 词**写进 `comments.hit_word`；
    - 开启且未命中任何词 → `approved`，立即计入 `comment_count`。
 2. 机审规则（契约，刻意保持最简）：词库是 `banned_words` 表（§2.9），机审只取 `is_enabled = 1` 的行；正文与词项都转小写后做子串包含判断（中文天然适用）；词库为空即无违禁词。**不做分词、不做 AC 自动机、不做正则**；防变体（拆字、全半角、谐音）是独立的未来议题。**`reject` 优先于 `pending`**：同一条正文同时命中两级时按 `reject` 处置，因为它更严且不可入库。词表走进程内缓存，任何写操作后整体失效，所以「保存词库 → 下一条评论即用新词库」仍成立，不需要重启。
-3. 处置动作分两级，**由博主逐词决定，默认 `pending`**：`pending` 只转人工待审、不做终局裁决（避免误伤不可挽回）；`reject` 是博主对该词的终局裁决，命中即拒且不落库——被拒的评论因此**不进任何列表、无法回审、也不留痕**，博主只能从用户侧那条报错提示知道它发生过。这是 2026-10-03 对原「命中违禁词只转人工待审、机审一律不做终局裁决」的收窄：把不可挽回的那一步交给博主显式选定 `reject` 的那些词，而不是交给全部词。
+3. 处置动作分两级，**由博主逐词决定，默认 `pending`**：`pending` 只转人工待审、不做终局裁决（避免误伤不可挽回）；`reject` 是博主对该词的终局裁决，命中即拒且不落库——被拒的评论因此**不进任何列表、无法回审、也不留痕**，博主只能从用户侧那条报错提示知道它发生过。不可挽回的那一步只交给博主显式选定 `reject` 的那些词，而不是交给全部词。
 4. 接口契约：`POST /comments` 的 `data` 返回该评论的最终 `status`（`'approved'` 或 `'pending'`），前端据此区分「已发布」与「待审核」，**不得再以「重新拉取列表是否多出一条」反推状态**。命中 `reject` 词时没有 `data`，是 400 + 中文 message，由前端拦截器统一提示（§5.4）。
 5. 前台只展示 `approved`；只有 `approved` 计入 `comment_count`。每条评论（含回复）各自判定，回复的展示只看自身 `status`，不继承父评论。未发布文章的评论**读取**与文章详情共用同一可见性门禁（作者/管理员可读，其余按「不存在」响应）。
-6. 博主在待审列表裁决：通过 → `approved` 且计数 +1；拒绝 → `rejected` 且计数不变；**允许回审**（`approved`/`rejected` → `pending`，2026-10-02 按主流审核台惯例转正），计数只在跨越 `approved` 边界时增减，扣减有下限保护。删除评论见第 8 条。
+6. 博主在待审列表裁决：通过 → `approved` 且计数 +1；拒绝 → `rejected` 且计数不变；**允许回审**（`approved`/`rejected` → `pending`），计数只在跨越 `approved` 边界时增减，扣减有下限保护。删除评论见第 8 条。
 7. 删除文章时其评论一并清理（所有删除路径共用同一条级联实现，见 §3.2「文章删除路径一致性」与 §5.7 禁止事项第 7 条）。
 8. 删除评论是硬删：删根评论时连带其回复一起删，`comment_count` 按被删的已通过条数扣减，下限为 `0`。
 
@@ -328,7 +319,7 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 
 1. 未登录点击 → 引导登录并可回跳原页；不产生任何写入。
 2. 已登录点击 → 按当前状态选择「赞」或「取消赞」，两者都必须**幂等**（重复提交不产生第二条记录、不报错，返回当前真实状态）。
-3. 点赞目标**仅限 `published` 文章**：对草稿/定时文章或已删除文章的点赞请求按「不存在」拒绝，不泄露存在性。
+3. 点赞目标**仅限 `published` 文章**：对草稿、定时、已下线文章或已删除文章的点赞请求按「不存在」拒绝，不泄露存在性。
 4. 计数以关联记录的实际条数**绝对重算**写回 `like_count`，不做 `+1 / -1` 盲增，以便天然幂等并顺带修正历史脏值。
 5. 前端按钮状态以服务端返回值为准，不做乐观更新。
 
@@ -336,8 +327,8 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 
 博主在 `/admin/**`（要求 `admin` 角色）管理：文章全生命周期、评论审核、分类与标签（含合并）、用户启停、站点开关、概览数据。后台是**独立界面族**，不复用前台的读者视图。
 
-1. 后台读到的分类/标签文章数是**全量口径**（含 `draft` / `scheduled`），与公开列表的已发布口径分列（§2.4）。
-2. **分类的删除语义：分类下仍有文章（含草稿与定时）时拒绝删除**。删除前先按全量口径统计该分类的文章数，大于 0 即抛业务异常（400），中文原因写明篇数与处置方式（「该分类下还有 N 篇文章，请先迁移或删除后再删除分类」）；空分类照常删除。不做「删了分类、文章显示为未分类」那套承诺：库表无外键也无软删除（§5.7、db-design.md §1.5），删掉分类后文章的 `category_id` 仍留着原值，「发布必选分类」的前后端校验判的都是**非空**而不是「分类存在」，于是这篇带着悬空 id 的文章能照常发布——列表接口的 `LEFT JOIN categories` 取不到分类名，读者看不到分类、也筛不出它；草稿箱、个人主页与后台列表则把它显示成「未分类」（呈现层兜底，不是可筛选维度）。迁移文章的入口是文章的分类字段本身（后台列表与编辑器都可改），不在分类删除时顺带处理。
+1. 后台读到的分类/标签文章数是**全量口径**（含 `draft` / `scheduled` / `offline`），与公开列表的已发布口径分列（§2.4）。
+2. **分类的删除语义：分类下仍有文章（含草稿、定时与已下线）时拒绝删除**。删除前先按全量口径统计该分类的文章数，大于 0 即抛业务异常（400），中文原因写明篇数与处置方式（「该分类下还有 N 篇文章，请先迁移或删除后再删除分类」）；空分类照常删除。不做「删了分类、文章显示为未分类」那套承诺：库表无外键也无软删除（§5.7、db-design.md §1.5），删掉分类后文章的 `category_id` 仍留着原值，「发布必选分类」的前后端校验判的都是**非空**而不是「分类存在」，于是这篇带着悬空 id 的文章能照常发布——列表接口的 `LEFT JOIN categories` 取不到分类名，读者看不到分类、也筛不出它；草稿箱、个人主页与后台列表则把它显示成「未分类」（呈现层兜底，不是可筛选维度）。迁移文章的入口是文章的分类字段本身（后台列表与编辑器都可改），不在分类删除时顺带处理。
 3. 标签与之相反：删除与合并都**联动改写 `post_tags` 关联**（§2.4），因为标签是多对多且文章可无标签，摘掉一个标签不改变文章的归属与可见性。
 
 ### 4.7 关注
@@ -360,20 +351,21 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 |---|---|
 | 后端运行时 | Java 21；Spring Boot 3.5.14；单模块、按包分层 |
 | 持久层 | **MyBatis 3.0.5（纯 MyBatis，不是 MyBatis-Plus）**；分页用 PageHelper 2.1.0 |
-| 数据库 | MySQL 8；Redis（仅用于验证码与阅读计数两处，见 §5.6） |
+| 数据库 | MySQL 8；Redis（认证面频控与水位、阅读去重、上传日额度，见 §5.6） |
 | 安全 | Spring Security + JJWT 0.12.6 |
 | 对象存储 | MinIO 8.5.14 |
 | 文档 | SpringDoc OpenAPI 2.8.5（Swagger UI） |
 | 前端 | Vue 3.5 + TypeScript 6 + Vite 8；Pinia 3；**Vue Router 5** |
 | UI 与编辑器 | Element Plus 2.13（及其官方图标包 `@element-plus/icons-vue`，仅限界面小图标，见 ui-design §4.6）；写作内核 Vditor 4，阅读渲染用 md-editor-v3 的预览组件（**两套并存，各管读写，不要统一**） |
 | 其他 | axios、dayjs、sass、自托管字体 `@fontsource/noto-sans-sc` 与 `@fontsource/jetbrains-mono`；后端另有既有依赖 hutool-all 5.8.35（仅用于验证码随机数）；Node `^20.19.0 \|\| >=22.12.0` |
+| 前端测试 | Vitest 5 + `@vue/test-utils` 2 + happy-dom 20，三枚都是 `devDependencies`（§5.7 第 4 条例外）；`npm run test` 跑 `src/**/__tests__/*.spec.ts`，happy-dom 环境、`TZ=UTC`。测试文件不进 `vue-tsc --build` 也不进 `vite build` 产物（`tsconfig.app.json` 的 exclude 已覆盖该目录），也不发真实请求 |
 
 ### 5.2 目录与分层规范
 
 | 规范 | 内容 |
 |---|---|
 | 顶层目录 | `cloudlog_api/`（后端）、`cloudlog_web/`（前端）。**README 中的 `api/`、`web/` 已过期**，按这两个名字找 |
-| 后端依赖方向 | `controller → service → mapper → DB`，单向向下。禁止 controller 被 service 反向依赖、禁止 controller 直接调 mapper。历史违规已收口：`CommentController` 与 `UploadController` 曾直接注入 `UserMapper`，现全部改走 service（评论身份回填只在 `CommentService`，头像写库走 `UserService.updateAvatar`）；新增代码不得再出现 controller 注入 Mapper |
+| 后端依赖方向 | `controller → service → mapper → DB`，单向向下。禁止 controller 被 service 反向依赖、禁止 controller 直接调 mapper：评论身份回填只在 `CommentService`，头像写库走 `UserService.updateAvatar`，controller 一律不注入 Mapper |
 | 包职责 | `controller`（入参/权限注解/组装响应）、`service`（业务规则与事务）、`mapper` + `resources/mapper/*.xml`（SQL）、`entity` / `model.dto` / `model.vo` / `model.converter`、`common`（统一响应与全局异常）、`config`、`security` |
 | SQL 位置 | **只写在 XML**，接口方法用命名参数；禁止注解式 SQL |
 | 对象转换 | 手写转换器（`PostConverter` 一类），禁止引入 MapStruct |
@@ -389,7 +381,7 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
    - 组件不得二次拼装同类错误提示（会双弹）；
    - 组件若需要额外处理失败，只做局部逻辑，不要再弹一条全局提示；
    - 401 的会话失效处理只允许集中在拦截器，不散落到各视图。
-5. 视图与 store 中**不得保留演示/假数据**，不得做乐观更新（点赞/关注以服务端返回值为准）。历史违规（详情页硬编码假评论、点赞按钮本地自增）已随真实链路接入一并删除，新增代码不得再引入同类伪造逻辑。
+5. 视图与 store 中**不得保留演示/假数据**，不得做乐观更新（点赞/关注以服务端返回值为准）。伪造链路（详情页硬编码假评论、按钮本地自增计数一类）不得引入。
 
 ### 5.4 接口与响应约定（后端）
 
@@ -397,10 +389,10 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 |---|---|
 | 统一响应 | `code` + `message` + `data`。成功 `code` 恒为 `200`、`message` 为「操作成功」；失败时 `data` 为空 |
 | message | **必须是可直接展示给用户的中文一句话**，前端不再二次拼装 |
-| 分页 | 响应 `total` / `page` / `pageSize` / `list`；`list` 空时为 `[]` 而非空值。新接口入参统一用 `page` / `pageSize`（存量草稿接口用 `pageNum`，属历史包袱，不迁移也不扩散） |
+| 分页 | 响应 `total` / `page` / `pageSize` / `list`；`list` 空时为 `[]` 而非空值。新接口入参统一用 `page` / `pageSize` 并以 `@Min(1) @Max(50)` 封顶（存量草稿接口用 `pageNum`，属历史包袱，不迁移也不扩散） |
 | 错误码 | 与 HTTP 状态码同值：400 参数/业务校验、401 认证失败或账号禁用、403 越权、404 资源不存在。**禁止引入五位错误码体系** |
 | 业务校验失败 | 抛运行时异常并携带中文原因，由全局兜底转 400；资源不存在抛专门的未找到异常（HTTP 与 `code` 一致） |
-| 时间 | 服务端时区 `GMT+8`。出站 `LocalDateTime` 为 ISO 格式（前端统一格式化）；入站计划时刻沿用既有字符串格式 `yyyy-MM-dd HH:mm:ss` 并显式声明时区——**该格式已是对外契约的一部分**，不得单方面改。新接口不再引入旧日期类型 |
+| 时间 | 服务端时区 `GMT+8`。「现在」的基由**连接**钉住：数据源串带 `connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true`，驱动建连时发 `SET time_zone='+08:00'`，于是库侧的 `NOW()` / `CURRENT_TIMESTAMP` / `ON UPDATE` 与 Java 侧 `businessNow()`（锚 `Asia/Shanghai`）写的是同一套北京墙钟。时刻列都是 `TIMESTAMP`，MySQL 按会话时区换算读写——会话不钉就退化成数据库主机的 `SYSTEM`，而只写 `serverTimezone` 并不会改会话。判定侧（评论最小间隔、日志保留期阈值）与出站侧（sitemap / RSS 的时区偏移）一律锚北京墙钟，裸 `now()` 与 `ZoneId.systemDefault()` 不得回潮；SQL 里继续写 `NOW()`，**不要**换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(),...)`：那样会话一漂列值漂、写死的基准不漂，两边就此分家。实际会话值由 `DataSourceTimeZoneTest` 对真库断言，不靠读配置推定。出站 `LocalDateTime` 为 ISO 格式（前端统一格式化）；入站计划时刻沿用既有字符串格式 `yyyy-MM-dd HH:mm:ss` 并显式声明时区——**该格式已是对外契约的一部分**，不得单方面改。新接口不再引入旧日期类型 |
 | 文档注解 | 新增/改动接口必须补齐分组、操作摘要、参数与字段描述，中文，与既有文件风格一致 |
 | 排序 | 列表排序取值集合必须唯一且文档与实现一致，对外只有 `latest` / `recommended` / `popular` 三个取值（口径与各自使用场景见 §3.2「排序参数」；前端列表参数只暴露前两个，`popular` 归侧栏热榜独占）；改动时以**同时收口两侧**为唯一正确做法，不得只改一侧 |
 
@@ -409,11 +401,11 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 | 项 | 约束 |
 |---|---|
 | 会话 | 无状态，关闭 CSRF；不使用服务端 session |
-| token | HMAC-SHA 系；算法由 JJWT 按密钥字节长度推导（≥32 字节 HS256，≥48 字节 HS384，≥64 字节 HS512），**本文不写死 HS256**。subject 为**邮箱**，有效期 7 天；**无刷新令牌、无轮换、无逐枚 jti 黑名单**（账号禁用靠每请求回库重载实现即时失效；**口令的两处写入各推一枚按账号的失效水位键 `auth:token-epoch:{email}`**——找回密码 `POST /auth/password/reset`（未登录发起，凭一次性验证码）与修改口令 `PUT /user/password`（需登录，先验当前口令；邮箱没变，旧 token 仍验得过签名，只有水位能作废它），签发时刻早于水位的 token 一律按未登录处理，见 §6「例外」与 `db-design.md` §5.4）。核对（JJWT 0.12.6 + JDK 21 实测）：47 字节 → HS256，63 字节 → HS384，64 字节 → HS512；本地配置密钥为 63 字节，故当前实际签发算法是 HS384 |
+| token | HMAC-SHA 系；算法由 JJWT 按密钥字节长度推导（JJWT 0.12.6 + JDK 21 下：47 字节 → HS256，63 字节 → HS384，64 字节 → HS512），**本文不写死 HS256**。subject 为**邮箱**，有效期 7 天；**无刷新令牌、无轮换、无逐枚 jti 黑名单**（账号禁用靠每请求回库重载实现即时失效；**口令与会话的三处写入各推一枚按账号的失效水位键 `auth:token-epoch:{email}`**——找回密码 `POST /auth/password/reset`（未登录发起，凭一次性验证码）、修改口令 `PUT /user/password`（需登录，先验当前口令；邮箱没变，旧 token 仍验得过签名，只有水位能作废它）与登出 `POST /auth/logout`，签发时刻早于水位的 token 一律按未登录处理，见 §6「例外」与 `db-design.md` §5.4）。本地配置密钥为 63 字节，当前实际签发算法是 HS384 |
 | 过滤链顺序 | 顺序即规则，自上而下：`/auth/**` 与 `/error` 放行 → `GET /articles/drafts`、`GET /articles/mine` 要求登录（含私有数据的 GET 子路径都必须排在通配之前） → `GET /articles/**`、`/categories/**`、`/tags/**`、`/site/**` 放行（`/site/**` 是关于页文案的公开读取） → `/robots.txt`、`/sitemap.xml`、`/feed.xml` 三条**按精确路径**放行（爬虫直读，见 §3.2 与 README 的反向代理一节；写成 `/*.xml` 这种宽模式会把别处也漏出去） → 仅 `/actuator/health` 放行、接口文档放行只在 dev（`springdoc.api-docs.enabled` 为真时才装配这三条规则，其余 actuator 端点不放行） → `/admin/**` 要求 `ADMIN` → **其余一律要求登录**（含其他 actuator 端点）。管理端的分类读取 `GET /admin/categories` 落在 `/admin/**` 这条上，**不被上面 `/categories/**` 的通配放行覆盖**（该模式只匹配以 `/categories` 开头的路径），与 `/admin/tags` 同写法再叠一层方法级角色注解 |
 | 关键陷阱 | 「`GET /articles/**` 通配放行」意味着**任何新增的 `/articles/` 下 GET 子路径会自动变成公开接口**。含私有数据的 GET 端点必须显式排在通配之前（现有先例：`/articles/drafts`、`/articles/mine`，照它们做）。放行与否只看路径不够，属主与角色判定仍要在服务层谓词里做——路径规则只决定谁够得到这条路由，够到之后能不能读这一篇另有一道 `isViewable` 判定（§4.3 第 2 条） |
 | 写权限 | 文章的创建/更新/删除仅博主（方法级角色注解）。**普通登录读者只能评论、点赞、关注作者、改自己的资料**，不能发文——这是真实的权限模型，不要「顺手」放开。草稿的删除/清空（`DraftController`）无角色注解，属主谓词保证只能删自己的草稿/定时文章；不得据此放开其他写接口 |
-| 登录留痕与锁定的可调性 | 登录的四种结局各异步写一行 `login_logs`（§2.12），写失败只记 error、**不改登录接口的响应与状态码**；禁用账号那条只留痕，异常原样抛出，401 与提示语仍由全局处理器给。锁定的次数与时长自 2026-10-03 起不再是编译期常量：`PUT /admin/login-policy` 写 `site_settings` 两键（仅 `ADMIN`，越界 400），登录链路每次读一次并向下传 |
+| 登录留痕与锁定的可调性 | 登录的四种结局各异步写一行 `login_logs`（§2.12），写失败只记 error、**不改登录接口的响应与状态码**；禁用账号那条只留痕，异常原样抛出，401 与提示语仍由全局处理器给。锁定的次数与时长不是编译期常量：`PUT /admin/login-policy` 写 `site_settings` 两键（仅 `ADMIN`，越界 400），登录链路每次读一次并向下传 |
 | 属主校验 | 任何「用户操作自己资源」的接口，服务端谓词里必须显式带上属主条件（`author_id` / `user_id`）。草稿删除的属主过滤在 `findOwnedDraft` 的 SQL 谓词内（`id + author_id + 状态为草稿/定时`），修此类问题的方式是补 SQL 条件，不是加前端判断 |
 | 身份来源 | 凡涉及「当前用户」，一律服务端从安全上下文取，**忽略请求体里的用户标识**（评论已如此，新接口照此） |
 | 前端守卫 | 路由守卫（登录态、`role` 等值比较）**只是体验门槛，不是安全边界**，可被本地存储篡改绕过。真权限只在后端；禁止在前端做权限判定的兜底 |
@@ -425,25 +417,25 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 | 依赖 | 用途与边界 |
 |---|---|
 | MinIO | 所有上传图片（头像、正文插图、封面）。对象键为 `{用途}/{yyyyMM}/{随机名+原扩展名}`，按用途与上传年月分前缀，历史数据仍是桶根平铺、不回刷；细则见 `db-design.md` §5.5。**上传返回的是拼接了域名的完整 URL 并直接落库**——换存储域名需要回刷库，这是已知代价，不要改成前端拼 |
-| MinIO 校验 | 最终以**文件魔数**裁决：`FileService` 读前 16 字节比对 jpeg/png/gif/webp 四种文件头，命中才入库，**扩展名由服务端按魔数生成**，不再采信客户端申报的内容类型与 `originalFilename` 的扩展名片段；申报的内容类型只作 Controller 层的第一道快速过滤。单文件上限 10MB。对象无回收仍是弱点，见 §6 |
-| Redis | 只有两处：① 认证面（码值键 5 分钟 TTL、一次性、校验通过即销毁；另有发码频控键、校验失败计数键 `auth:code-try:{purpose}:{email}`、登录失败计数键 `auth:login-fail:{email}:{ip}`、口令重置的 token 失效水位键 `auth:token-epoch:{email}`，口径见 §3.2、键位汇总见 `db-design.md` §5.4）；② 阅读**去重**（`article:view_dedup:{postId}` 小时窗口集合，`SADD`+判 `TTL`+`EXPIRE` 由一条 Lua 脚本原子完成。库里那列 `view_count` 是计数的唯一存储，Redis 侧不再有第二个计数器）。**未启用注解式缓存**，没有 `@Cacheable`、没有 `CacheManager`。不要为省查询随手加缓存层 |
-| 阅读量口径 | **只有 `published` 文章的详情访问才计数，且同一访问者 1 小时窗口内只 +1**；预览草稿与定时文章不计。键位、访问者标识与 TTL 设置时机见 `db-design.md` §5.2。计数**只有库列这一处存储**：2026-10-03 删掉了那枚只写不读的 `article:view_count:` Redis 计数器，Redis 只负责「这次访问算不算」的判定，不再各记一份。去重是尽力而为的防刷：`X-Forwarded-For` 客户端可控，换申报值即可绕开，不要当硬保证。地址在 Set 里只作成员存在 1 小时，Set 本身不是存储；但**同一次判定会异步落一行 `visit_logs`**，那里留 180 天（§2.11）——「访问行为不入库」从 2026-10-03 起不再成立 |
+| MinIO 校验 | 最终以**文件魔数**裁决：`FileService` 读前 16 字节比对 jpeg/png/gif/webp 四种文件头，命中才入库，**扩展名由服务端按魔数生成**，不再采信客户端申报的内容类型与 `originalFilename` 的扩展名片段；申报的内容类型只作 Controller 层的第一道快速过滤。单文件上限 10MB；另有按用户的上传日额度 `upload:daily:{userId}`（100 次/日，见本表 Redis 行）。对象回收已补上：换下的头像与随文章删除的封面/正文配图会一并从桶里删掉，判据与代价见 §3.3「图片对象回收」；不做全桶扫描与孤儿对象巡检（§6） |
+| Redis | 只有三处：① 认证面（码值键 5 分钟 TTL、一次性、校验通过即销毁；另有发码频控键、校验失败计数键 `auth:code-try:{purpose}:{email}`、登录失败计数键 `auth:login-fail:{email}:{ip}`、token 失效水位键 `auth:token-epoch:{email}`，口径见 §3.2，键位汇总见 `db-design.md` §5.4）；② 阅读**去重**（`article:view_dedup:{postId}` 小时窗口集合，`SADD`+判 `TTL`+`EXPIRE` 由一条 Lua 脚本原子完成。库里那列 `view_count` 是计数的唯一存储，Redis 侧没有第二个计数器）；③ 上传日额度（`upload:daily:{userId}`，每用户 100 次/日）。**未启用注解式缓存**，没有 `@Cacheable`、没有 `CacheManager`。不要为省查询随手加缓存层 |
+| 阅读量口径 | **只有 `published` 文章的详情访问才计数，且同一访问者 1 小时窗口内只 +1**；未发布内容（草稿 / 定时 / 已下线）的预览与 bot（含空 UA）一律不计。键位、访问者标识与 TTL 设置时机见 `db-design.md` §5.2。计数**只有库列这一处存储**，Redis 只负责「这次访问算不算」的判定，不另记计数。去重是尽力而为的防刷：`X-Forwarded-For` 客户端可控，换申报值即可绕开，不要当硬保证。地址在 Set 里只作成员存在 1 小时，Set 本身不是存储；但**同一次判定会异步落一行 `visit_logs`**，那里留 180 天（§2.11） |
 | SMTP | 仅用于注册验证码。无条件装配、无开关、无降级——**邮件配置缺失会导致启动或发码失败**，涉及发码链路的改动要意识到这一点 |
-| 访问日志 | **写库**（2026-10-03 启用，规则见 §2.11）：只在 `published` 文章详情命中阅读量判定时异步落一行，bot 与空 UA 不写，写失败只记 error 不影响详情；原始 IP 入库、只在读取侧脱敏，超 180 天的行由保留期任务删除。库侧口径见 `db-design.md` §2.9（写入、脱敏、聚合）与 §4.1/§4.4（`idx_created_at` 与其代价）。 |
+| 访问日志 | **写库**（规则见 §2.11）：只在 `published` 文章详情命中阅读量判定时异步落一行，bot 与空 UA 不写，写失败只记 error 不影响详情；原始 IP 入库、只在读取侧脱敏，超 180 天的行由保留期任务删除。库侧口径见 `db-design.md` §2.9（写入、脱敏、聚合）与 §4.1/§4.4（`idx_created_at` 与其代价） |
 
 ### 5.7 禁止事项
 
 1. 禁止引入多租户、组织架构、团队空间、协作编辑。
 2. 禁止引入支付、订阅、会员、付费墙、积分、等级、签到。
 3. 禁止引入 RBAC 权限矩阵、角色继承、细粒度授权表。角色只有 `admin` / `user` 两个字符串值。
-4. 禁止在既有依赖之外引入新框架/新 UI 库/新状态管理/新图标体系/新缓存方案。前端一律复用既有组件库与既有样式变量。
+4. 禁止在既有依赖之外引入新框架/新 UI 库/新状态管理/新图标体系/新缓存方案。前端一律复用既有组件库与既有样式变量。**例外**：测试设施作为 `devDependencies` 放行，清单只有三枚——`vitest`（运行器）、`@vue/test-utils`（组件挂载）、`happy-dom`（DOM 实现）。第三枚不是可选项：`src/utils/seo.ts` 在模块加载时就取 `document.querySelector`，`@vue/test-utils` 的 `mount` 也需要 document，纯 Node 环境连 import 都进不来。放行止于这三枚：不据此引入端到端框架（Playwright / Cypress / Testcontainers 一类，第六条本就禁 Testcontainers），不得落进 `dependencies`，也不改变本条其余禁令。
 5. 禁止引入消息队列、分布式锁、幂等表、独立的定时任务框架（Quartz、XXL-JOB 等；Spring 自带的 `@Scheduled` 属内建能力，允许）、搜索引擎、向量检索。**本项目按单实例部署假设设计**。
 6. 禁止引入 MapStruct、Testcontainers、五位错误码体系、代码生成器。
-7. 文章删除的**级联只有一个实现**（`ArticleService` 内的 `cascadeDelete`，`@Transactional` 内按 `post_tags` → `likes` → `comments` → `posts` 的顺序先删子行、最后删主行）；`deletePost`（前台/后台共用）、`deleteDraft`、`clearDrafts` 三条路径都复用它。禁止新增只删主表的旁路。`seo_meta` 曾按原约定并入这一顺序，2026-10-03 随该表下线撤出（§2.10）。`follows` 与文章无关，**不随文章删除**。
+7. 文章删除的**级联只有一个实现**（`ArticleService` 内的 `cascadeDelete`，按 `post_tags` → `likes` → `comments` → `posts` 的顺序先删子行、最后删主行）；`deletePost`（前台/后台共用）、`deleteDraft`、`clearDrafts` 三条公开入口各挂 `@Transactional` 调用它，四表删除同事务原子。禁止新增只删主表的旁路。`follows` 与文章无关，**不随文章删除**。
 8. 禁止单方面修改已对外稳定的契约：响应体字段、分页入参名、计划时刻字符串格式、接口前缀。
 9. 禁止以「重构」为名改动已稳定模块（阅读量双写、历史包位、JWT subject、统一响应结构）。
 10. 禁止为 `Like` 引入多目标点赞抽象（`target_type` 一类）——当前只有文章可点赞。
-11. 禁止在文档/注释里写「已支持」而代码未支持（§2.7 两张表与 §3 的现状列即为防此类漂移而设）。
+11. 禁止在文档/注释里写「已支持」而代码未支持（§2.7 的表位登记与 §3 的现状列即为防此类漂移而设）。
 12. 禁止为 `Follow` 引入互关 / 好友语义、更新通知，或把关注接进任何排序与分发——它只产出计数、按钮状态与个人主页列表（§4.7 第 7 条）。粉丝/关注列表页**仅限本人视角**（自己看自己的关注与粉丝），不做他人主页的粉丝浏览。
 
 ---
@@ -456,10 +448,10 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 
 - 不做多博主 / 作者协作 / 编辑部角色。
 - 不做第三方登录（OAuth）、SSO、双因素认证。
-- 不做 token 刷新、主动登出接口、**逐枚 jti 黑名单**。
-- **口令重置的失效水位是上一条的例外，且仅此一种**（2026-10-03 由用户裁决移出「不做」清单）：重置成功后按账号写一枚 Redis 键 `auth:token-epoch:{email}`，签发时刻（JWT 的 `iat`）早于它的 token 一律按未登录处理 → 401。不建黑名单表、不加 jti 声明：重置链路本就是未登录发起的，请求头里没有攻击者那枚 token，按 jti 拉黑「当前 token」等于什么都没拉黑；而 subject 是邮箱，所以**改邮箱不需要这枚键**，旧 token 自然查不到用户（§3.1）。裁决若再变，先改本条再动代码。
+- 不做 token 刷新、逐枚 jti 黑名单。主动登出只有 `POST /auth/logout` 一种形式：把该账号的失效水位推到此刻，作废该账号全部在存 token（见下一条）。
+- **token 失效水位是上一条的例外，且仅此一种**：按账号写一枚 Redis 键 `auth:token-epoch:{email}`，找回密码 `POST /auth/password/reset`（未登录发起，凭一次性验证码）、修改口令 `PUT /user/password`（需登录，先验当前口令）与登出三处各推一次，签发时刻（JWT 的 `iat`）早于它的 token 一律按未登录处理 → 401。不建黑名单表、不加 jti 声明：重置链路本就是未登录发起的，请求头里没有攻击者那枚 token，按 jti 拉黑「当前 token」等于什么都没拉黑；而 subject 是邮箱，**改邮箱不需要这枚键**，旧 token 自然查不到用户（§3.1）。裁决若再变，先改本条再动代码。
 - 不做站内通知、私信。
-- **关注是上一条清单的例外，且仅此一种**（2026-10-01 由用户裁决移出「不做」清单）：登录读者可对文章作者做单向、可撤销的一次性表态，产物是关注计数、按钮状态与个人主页内的关注/粉丝列表（2026-10-02 按主流设计转正，仅限本人视角，见 §4.7 第 6 条与 §5.7 第 12 条）；个人主页同时提供「我点赞的文章」列表（同样仅本人视角）。**不做**互关 / 好友、不做他人可浏览的粉丝页、不做「我关注的人」feed、不做更新提醒、不改变任何列表排序。裁决若再变，先改本条再动代码。
+- **关注是上一条清单的例外，且仅此一种**：登录读者可对文章作者做单向、可撤销的一次性表态，产物是关注计数、按钮状态与个人主页内的关注/粉丝列表（仅限本人视角，见 §4.7 第 6 条与 §5.7 第 12 条）；个人主页同时提供「我点赞的文章」列表（同样仅本人视角）。**不做**互关 / 好友、不做他人可浏览的粉丝页、不做「我关注的人」feed、不做更新提醒、不改变任何列表排序。裁决若再变，先改本条再动代码。
 
 **内容形态**
 
@@ -476,32 +468,24 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 
 **数据与运维**
 
-- 不做 BI 看板、埋点平台、**访问来源分析设施**（地理归属、完整设备解析、回访识别、导出、自建统计管道）。文章访问的入库与后台那一页不属于本条（2026-10-03 由用户裁决启用，见 §2.11 与 §3.2「访问统计」）——本条禁的是在它上面再叠一层来源分析设施。
+- 不做 BI 看板、埋点平台、**访问来源分析设施**（地理归属、完整设备解析、回访识别、导出、自建统计管道）。文章访问的入库与后台那一页不属于本条（见 §2.11 与 §3.2「访问统计」）——本条禁的是在它上面再叠一层来源分析设施。
 - 不做读写分离、分库分表、多环境配置中心、K8s。
 - 不做图片裁剪/缩略图流水线/CDN 接入。
-- **不做 SSR / 预渲染**（2026-10-03 随 SEO 链路一并明确）：文章级 SEO 元数据靠浏览器执行 JS 后注入 meta，只对会渲染 JS 的爬虫有效，百度与社交卡片爬虫拿不到（§2.10）。这是已知且被接受的局限，不为了覆盖它们引入一套渲染架构。
+- 不做全桶扫描与孤儿对象巡检：对象回收只挂在「换头像」与「删文章」两条事件链路上（§3.3），除此之外的对象一律不碰，残留范围见下方技术债。
+- **不做 SSR / 预渲染**：文章级 SEO 元数据靠浏览器执行 JS 后注入 meta，只对会渲染 JS 的爬虫有效，百度与社交卡片爬虫拿不到（§2.10）。这是已知且被接受的局限，不为了覆盖它们引入一套渲染架构。
 - 不做内容审核模型、第三方机器反垃圾服务、**外部词库源与词库自动更新**（防刷只到 §3.2 列出的频控为止）。**唯一例外**是 `banned_words` 表承载的违禁词机审（§2.9、§4.4 第 1–3 条）：词库由博主在后台逐条录入，或**手工粘贴一段文本批量导入**——后者是录入方式，不是接入外部词库源；匹配是精确子串包含，处置动作分 `pending` / `reject` 两级、默认 `pending`。不引入分词、AC 自动机、正则变体防护，也**不做「待审延迟 N 分钟自动通过」**、不做命中统计与按词反查评论（db-design.md §6）。
 
 **已排除的技术债**（承认其存在并保留现状，不在任何改动中顺手处理）
 
-- **已还掉的一条**（2026-10-03）：`Result.error` 手动返回时 HTTP 状态仍为 200——控制器层已不再直接返回它（`UploadController.uploadAvatar` 的两处改走 `BizException`，与其余三类图片上传共用同一条校验路径）。剩余的 `Result.error` 只出现在 `GlobalExceptionHandler`（每个处理方法都带 `@ResponseStatus`）与 `SecurityConfig.writeError`（过滤链在 MVC 之前、走不到 advice，自行 `setStatus`）里当**响应体构造器**用，HTTP 状态由注解/显式设置决定，不属这条债。
 - `dto` 与 `model/dto`、`entity` 与 `model` 包位并存。
-- **已还掉的两条**（2026-10-03）：阅读量那枚只写不读、无过期的 Redis 计数器 `article:view_count:` 已删除，计数只剩库列（`article:view_dedup:` 不在此列，它参与计数判据、带 1 小时 TTL，且写入与设 TTL 已合成一条 Lua 脚本）；上传的类型裁决已改为文件魔数嗅探，扩展名由服务端生成（§5.6）。
-- 上传的**对象无回收**仍在：替换头像或封面后旧对象继续留在桶里。
-- 前端无测试设施；后端集成测试需外部 MySQL/Redis 才能通过。
+- 图片回收的**残留范围**：①改文章时换下的旧封面、从正文里摘掉的一张图（文章还在，只有删除才回收）；②上传成功却从未被任何记录引用的对象；③回收失败留下的对象（只记一条 error，不重试）——都继续留在桶里。
+- 后端集成测试需外部 MySQL/Redis 才能通过；前端 `npm run test` 尚未接进 CI 流水线。
 
 **当前明确的下一个待决问题**（需要用户裁决，不得自动实现）
 
-1. 定时文章被提前手工发布时，`published_at` 是否改写为当前时刻（§4.2 第 5 条）。
+暂无。
 
-**已裁决、不再重提**（结论已落在 §3.2 与 §5.4）
-
-- 列表排序取值：`hottest` 别名废除。**2026-10-03 追加**：原「收口为 `latest` / `popular` 两个」已被首页「推荐 | 最新」双 tab 的裁决推翻，新增第三个取值 `recommended`，`popular` 随之**收窄为侧栏热榜 `/articles/hot` 独占**、前端列表参数不再暴露它；三个取值的口径见 §3.2「排序参数」与 §5.4。
-- 单条删除草稿的属主过滤：已补进 SQL 谓词（`id + author_id + 状态为草稿/定时`），不再是待决项。
-- **2026-10-02 追加**：关注/粉丝列表页（仅本人视角）、我点赞的文章列表、文章页分享入口（微博 / 微信 / 复制链接，微信二维码由前端本地生成、不外呼第三方服务）、审核回审（approved/rejected → pending）均按主流设计转正并写入对应章节；违禁词机审、定时发布调度、评论 `status` 回传、邮箱修改、关于页后端化、草稿免分类、401 拦截器同期落地。
-- **2026-10-02 追加（热榜与阅读口径）**：热门排序不再是 `view_count` 史榜，改为多信号加权 ÷ 引力衰减（§3.2「排序参数」，首页热榜与列表页「热门」共用同一分支）；阅读计数收口为「**已发布文章 + 访问者小时窗口去重**」（§4.3 第 3 条、§5.6，键位见 `db-design.md` §5.2）。权重（赞 ×3、评 ×5）、衰减指数 0.6 与窗口 3600 秒都是**内联常量，配置化明确不做**；为此也不引入新表、定时任务与新依赖。
-- **2026-10-03 追加（违禁词库）**：词库独立为 `banned_words` 表并把管理入口从「系统设置」移到「评论管理」（§2.6、§2.9、ui-design.md §3.11）；机审处置**分级**为 `pending` / `reject`，原「机审不做终局裁决」的绝对表述被收窄为「默认不做终局裁决，博主可逐词升级为直接拒绝」（§4.4 第 3 条）；批量导入**转正**，原 §6「不做外部敏感词库导入」相应收窄为「不做外部词库源与自动更新」，博主手工粘贴文本属录入方式；待审评论记录首个命中词 `comments.hit_word`（§2.5）。`site_settings.banned_words` 旧值直接丢弃、不迁移。
-- **2026-10-03 追加（全量安全审查修复，修订本节多处原表述）**：① **邮箱归一化分键**——登录防爆破（`auth:login-fail:*` 两层）与验证码/频控全部键改用 `trim + 小写` 归一化邮箱：库表是 ci 排序规则，键不归一时大小写变体各领一套爆破额度，两层锁定可被绕过（§3.2 原文的键位口径随之修订，`db-design.md` §5.4 已同步）。② **发码加两层日额度**——`auth:code-ip-daily:{ip}`（30/日）与 `auth:code-global-daily`（500/日），堵「换邮箱绕开邮箱维度」的邮件轰炸中继（§3.2）。③ **找回密码防枚举**——发码对未注册邮箱**静默跳过**（响应一律成功、不投递），重置口令对未注册邮箱报「验证码错误或已过期」而非「尚未注册」；原「与注册发码的反馈口径一致（直接拒绝）」表述作废，注册链路的「该邮箱已被注册」保留（注册表单的必要反馈）。④ **新增登出端点** `POST /auth/logout`：推 token 失效水位，作废该账号全部在存 token——水位置位点从「口令的两处写入」扩为三处（§5.1、`db-design.md` §5.4）。⑤ **阅读计数 bot 口径统一**——`UserAgentClassifier.isBot` 参与阅读计数判定：爬虫既不推 `view_count` 也不写 `visit_logs`，两侧恢复可对账（§4.3 第 3 条、§5.6）。⑥ **删除事务补齐**——`deleteDraft` / `clearDrafts` 挂 `@Transactional`，级联删除四表原子（§4.2）。⑦ **分页封顶收口**——作者主页/个人页的关注、粉丝、点赞列表与 `/articles/drafts|mine` 补 `@Min(1) @Max(50)`，违禁词库查询 DTO 同口径（§5.4）。⑧ **评论 `parent_id` 归一化**——插入前 null → 0，消除「发得出但列表不可见」的幽灵评论；存量 NULL 行已对开发库执行过一次性回填（与下列索引 ALTER 一并执行后迁移文件即删除，不再保留：`likes(idx_user)`、`follows(idx_follower)`、`comments(idx_user)`、`visit_logs(idx_created_at)`，新建库直接按 `schema.sql` 建表即含全部索引）。⑨ **索引补齐**——`likes(idx_user)`、`follows(idx_follower)`、`comments(idx_user)`，建表语句与迁移 SQL 同步（`db-design.md` §2）。⑩ **上传日额度**——`upload:daily:{userId}` 每用户 100 次/日（§5.6）。⑪ **定时发布时区显式化**——计划时刻校验锚 `Asia/Shanghai`（`ArticleService.BUSINESS_ZONE`），不再依赖 JVM 默认时区。⑫ 本地 JWT secret 已轮换为随机值（旧值进过 git 历史）；生产凭据轮换与历史重写仍属运维动作，见 README。
+既往裁决的修订记录见附录 B，现行口径以正文对应小节为准。
 
 ---
 
@@ -520,9 +504,34 @@ published → draft     经编辑器更新接口（`PUT /articles/{id}` 带 `sta
 | B3.1 | 点赞幂等与「禁止乐观更新」 | §4.5（流程）、§3.1（现状缺口）；仅指点赞幂等与禁止乐观更新，不适用于通用表单防重 |
 | B3.3 | 邮箱修改及其强制重新登录后果 | §3.3（P2）、§2.2（email 为 JWT subject） |
 | C4 | 明确不做清单 | §6（范围）+ §5.7（禁止事项） |
-| C5 · D8 | 定时文章被提前发布时 `published_at` 的未决语义 | §6 末尾待决问题第 1 条 |
+| C5 · D8 | 定时文章被提前发布时 `published_at` 的未决语义 | §4.2 第 5 条（2026-10-04 已裁决，不再是待决项） |
 | Part C · R9 · §0 | 旧稿内部引用（指向旧 ui 分节） | 随旧稿作废，无对应内容，不必映射 |
 | 列表页缓存语义（无编号） | 旧稿对列表页缓存的描述 | 新稿无此条；前端列表缓存属实现细节，由 ui-design 自行描述 |
 
 > 旧稿中与本稿结论相反的两条，以本稿为准：① 旧稿 A2/A6.3 把 `visit_logs`、`seo_meta`、`likes` 一并描述为在用的实体——三者现在都已接通（§3.1、§4.5、§2.10、§2.11），但在本稿 2026-09-29 核对基准与 2026-10-03 之前，`seo_meta` 与 `visit_logs` 确实只是预留表位；② 旧稿 A6.3 的「写 visit_logs：ip + UA」这一步在代码中曾长期不存在，2026-10-03 按 §2.11 建成，口径以本稿为准而非旧稿。
 
+## 附录 B · 修订记录
+
+本文唯一的修订史在此：正文一律现在时，沿革只落在本表。更早的旧稿史（2026-09-28 稿及其作废）见「附录 · 旧编号对照」（即附录 A）与 git 历史；纯测试过程明细（测试项数、端口号、工具与浏览器实测步骤）不入表，git 提交记录即档案。
+
+| 日期 | 变更 | 影响小节 |
+|---|---|---|
+| 2026-10-03 前 | 单条删除草稿的属主过滤补进 SQL 谓词（`id + author_id + 状态为草稿/定时`） | §5.5 属主校验 |
+| 2026-10-01 | 新增关注能力：单向、可撤销、不可自关注，只产出计数、按钮状态与个人主页列表，不驱动分发与通知；`follows` 表随能力启用；点赞链路按代码回改（`like_count` 绝对重算） | §2.1、§2.8、§3.1、§3.2、§4.5、§4.7、§5.5、§5.7 第 7/12 条、§6 |
+| 2026-10-02 | 一轮全量对齐：违禁词机审落地、`POST /comments` 回传最终 `status`、关注/粉丝列表与「我点赞的文章」及文章页分享入口转正、审核回审转正、定时发布执行与评论接线、邮箱修改、关于页后端化、401 拦截器转已实现、草稿免分类、草稿删除并入全站唯一级联、导航进度条接线 | §2.6、§3.1、§3.2、§3.3、§4.2 第 1 条、§4.4 第 4/6 条、§5.3、§5.7 第 7 条 |
+| 2026-10-02 | 热门排序改为多信号加权 ÷ 引力衰减（赞 ×3、评 ×5、衰减 0.6，内联常量不做配置化）；阅读计数收口为「已发布文章 + 访问者小时窗口去重」 | §3.2「排序参数」、§4.3 第 3 条、§5.6 |
+| 2026-10-02 | 分类计数拆为公开（只计 `published`）与管理端（全量）两条查询，新增 `GET /admin/categories`；删除分类改为「分类下仍有文章即拒绝」 | §2.4、§4.6 第 1/2 条 |
+| 2026-10-03 | 违禁词库独立为 `banned_words` 表（`site_settings` 旧键删除、旧值不迁移）；处置分级 `pending` / `reject`；待审评论记录首个命中词 `hit_word`；管理入口移至「评论管理」并支持批量导入；词库读走进程内缓存 | §2.5、§2.6、§2.9、§4.4、§5.7 第 4/5 条 |
+| 2026-10-03 | `seo_meta` 表当日建成完整读写链路、同日随「摘要全自动、手动 SEO 面下线」的裁决整体删除；详情页 SEO 三元组改为服务端合成（标题拼站点名 / 取摘要 / 标签名拼接）；摘要改为正文的服务端派生物，启动期 `ExcerptBackfillRunner` 回填存量 | §2.3、§2.10、§3.2、§4.2 第 6 条、§6 |
+| 2026-10-03 | `visit_logs` 建成完整链路：与阅读量同判据同刻、`@Async` 落库、bot 不写、保留 180 天；后台新增「日志管理 → 访问日志」，响应只出脱敏地址与七类 UA 标签 | §2.7、§2.11、§3.2、§5.6 |
+| 2026-10-03 | `login_logs` 建成：登录四个出口各异步一行；锁定次数与时长改为 `site_settings` 两键（读取夹紧、保存越界 400、只影响新开的计数窗口） | §2.12、§3.2、§5.5、§5.6 |
+| 2026-10-03 | 爬虫直读产物上线：`robots.txt` / `sitemap.xml` / `feed.xml` 后端直出；站点域名落 `site_settings.site_url`；前台运行时 meta 补全（OG、JSON-LD、canonical）；明确不做 SSR / 预渲染 | §3.2、§5.5、§6 |
+| 2026-10-03 | 全量安全审查修复：邮箱归一化分键、发码 IP/全站两层日额度、找回密码防枚举、新增登出端点（失效水位第三处写入）、阅读计数 bot 口径统一、删除事务补齐、分页封顶 `@Min(1) @Max(50)`、评论 `parent_id` 归一化、索引补齐、上传日额度、计划时刻校验锚 `Asia/Shanghai`、本地 JWT secret 轮换 | §3.2、§4.3、§4.4、§5.4、§5.5、§5.6、§6 |
+| 2026-10-03 | 排序取值收口为 `latest` / `recommended` / `popular`：`hottest` 别名废除，`popular` 收窄为侧栏热榜 `/articles/hot` 独占 | §3.2「排序参数」、§5.4 |
+| 2026-10-03 | 技术债清偿：`Result.error` 不再以 200 状态直返（控制器层改走 `BizException`）；`article:view_count:` 只写不读的 Redis 计数器删除；上传类型裁决改为文件魔数嗅探、扩展名由服务端生成 | §5.6、§6 |
+| 2026-10-04 | 定时文章未到点被手工发布时 `published_at` 覆写为当前时刻（唯一改写点；调度器、计划时刻已到、重新上线三条路径沿用原值） | §4.2 第 3/5 条 |
+| 2026-10-04 | 图片对象回收转正：新增 `ImageReclaimService`，覆盖换头像与删文章两条链路（提交后异步删、只认本桶地址、失败只记 error、不做全桶扫描），自「已排除的技术债」清偿转入 | §3.3、§5.6、§6 |
+| 2026-10-04 | 前端测试设施放行并落地：`vitest` / `@vue/test-utils` / `happy-dom` 三枚 `devDependencies` 作为 §5.7 第 4 条例外；16 项用例覆盖纯逻辑与代表组件 | §3.3、§5.1、§5.3、§5.7 第 4 条 |
+| 2026-10-04 | 时区口径写入侧收口：Java 侧写库与比对统一走 `businessNow()`（锚 `Asia/Shanghai`），不再吃 JVM 默认时区 | §3.2、§4.2、§5.4 |
+| 2026-10-04 | 时区口径判定侧、出站侧与库侧收口：评论最小间隔、日志保留期阈值、sitemap / RSS 的时区偏移都改锚北京墙钟；库侧**保留 `NOW()`**——时刻列是 `TIMESTAMP`，MySQL 读写都按会话时区换算，`NOW()` 与列值天然同基，于是改由连接串 `connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true` 把每条连接的会话显式钉成 +08:00（只写 `serverTimezone` 不改会话），实际会话值由 `DataSourceTimeZoneTest` 断言。曾把 SQL 两处 `NOW()` 换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00')`，**同轮实测否决**：会话一旦不是 +08，列值随会话漂而写死的基准不漂，反而凭空差 8 小时 | §2.11、§3.2、§4.4、§5.4、§5.6 |
+| 2026-10-04 | 文档规范化：文件头增量段迁入本表、正文去沿革注记、状态机补下线两条迁移、bot 与 `offline` 口径补齐、技术债清单只留未还项；同步修订源码注释的小节引用与沿革表述 | 全文 |

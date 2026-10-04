@@ -39,9 +39,13 @@
 
     <!-- 热榜不是史榜：多信号加权得分 ÷ 时间衰减，老文即使累计阅读更高也会被近期高互动文章反超。
          权重与衰减系数内联为常量（不做配置化）；衰减基准优先 published_at，存量空值回退 created_at。
-         GREATEST 把基准钳到 2：定时文章被提前手工发布时 published_at 仍是未来时刻（db-design.md §5.3 未裁决项），
-         DATEDIFF 取负会让 POW(负数, 0.6) 直接抛 1690 _out_of_range 打断整条查询；正常数据下该钳位不改变任何分值。
-         首页「推荐」与侧栏热榜共用这一份表达式，改一次两处同时生效 -->
+         GREATEST 把基准钳到 2：提前手工发布留下的存量行 published_at 还带着未来时刻（§4.2 第 3 条于
+         2026-10-04 才裁决改写，裁决之前发出去的行仍在），DATEDIFF 取负会让 POW(负数, 0.6) 直接抛 1690
+         _out_of_range 打断整条查询；正常数据下该钳位不改变任何分值。
+         首页「推荐」与侧栏热榜共用这一份表达式，改一次两处同时生效。
+         「现在」这里用 NOW() 而不是 CONVERT_TZ(UTC_TIMESTAMP(),...)：时刻列是 TIMESTAMP，MySQL 读写都按
+         会话时区换算，NOW() 与列值天然同基；连接串已把会话显式钉成 +08:00（application.yml，
+         DataSourceTimeZoneTest 断言），换成写死的偏移量反而会在会话不是 +08 时凭空造出 8 小时错位 -->
     <sql id="heatScore">
         ( COALESCE(p.view_count, 0)
         + COALESCE(p.like_count, 0) * 3
@@ -110,7 +114,7 @@
             <when test="sort == 'recommended'">ORDER BY p.is_top DESC, p.top_order DESC, <include refid="heatScore"/> DESC, p.id DESC</when>
             <!-- popular：侧栏热榜（/articles/hot）专用，纯热度、不因置顶改位次；单页取回，不做翻页，故不补尾键 -->
             <when test="sort == 'popular'">ORDER BY <include refid="heatScore"/> DESC</when>
-            <!-- latest：置顶先行，置顶内部按权重从大到小；权重相同（含存量统一赋的 1）回落到发布时间倒序（对外契约口径），
+            <!-- latest：置顶先行，置顶内部按权重从大到小；权重相同回落到发布时间倒序（对外契约口径），
                  NULL（存量手工发布的无时刻行）沉底 -->
             <otherwise>ORDER BY p.is_top DESC, p.top_order DESC, p.published_at DESC, p.id DESC</otherwise>
         </choose>
@@ -264,6 +268,12 @@
     <select id="findDraftIdsByAuthor" resultType="long">
         SELECT id FROM posts
         WHERE author_id = #{authorId} AND status IN ('draft', 'scheduled')
+    </select>
+
+    <!-- 对象回收前的取列（business-model.md §3.3）：级联删除只认封面与正文里的地址，
+         不需要详情那条查询的作者与分类两个 JOIN -->
+    <select id="findCoverAndContent" resultType="com.ayun.entity.Post">
+        SELECT id, cover, content FROM posts WHERE id = #{id}
     </select>
 
     <update id="clearPublishedAt">

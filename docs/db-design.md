@@ -53,7 +53,7 @@
 | `created_at` | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP`，除 `post_tags`、`site_settings` 外每表都有 |
 | `updated_at` | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`，**只有** `users`、`posts`、`site_settings`、`banned_words` 四张表有（见 §5.7 评论无 `updated_at` 的后果） |
 | `published_at` | 业务时间戳，仅 `posts` 有，`TIMESTAMP NULL DEFAULT NULL`，语义见 §5.3 |
-| 时区 | 服务端 `GMT+8`，不做 UTC 存储、不做应用层时区换算 |
+| 时区 | 服务端 `GMT+8`，不做 UTC 存储、不做应用层时区换算。时刻列都是 `TIMESTAMP`——MySQL 按**会话时区**换算存取，`NOW()` 与 `CURRENT_TIMESTAMP` 报的也是会话时区的墙钟，所以「服务端 GMT+8」这句话实际是靠会话时区成立的，而不是靠列类型。基由**连接**钉：`connectionTimeZone=%2B08:00` + `forceConnectionTimeZoneToSession=true` 让驱动在建连时发 `SET time_zone='+08:00'`（只写 `serverTimezone` 不够——它只告诉驱动怎么解释字节，不改会话，会话仍是主机的 `SYSTEM`）。钉住之后 `NOW()` / `CURRENT_TIMESTAMP` / `ON UPDATE` 与 Java 侧 `businessNow()` 写的北京墙钟同基，SQL 里继续用 `NOW()` 即可；**不要**换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')`——那样列值仍随会话换算、基准却被钉死，会话一旦不是 +08 反而凭空差 8 小时。实际会话值由 `DataSourceTimeZoneTest` 断言，不靠读配置推定。Java 侧一律 `businessNow()` / `ArticleService.BUSINESS_ZONE`，不写裸 `now()` 与 `ZoneId.systemDefault()` |
 | 不新增时间列 | 不引入 `deleted_at`、`approved_at`、`last_login_at`、`expires_at` 等。需要时先改本文 |
 
 ### 1.4 软删除
@@ -226,7 +226,7 @@
 
 **写入判据与 `view_count` 同源**：只在 `published` 文章详情命中 `article:view_dedup:{postId}` 小时窗口首访时落一行（§5.2），同一次判定里 `view_count` +1。所以「窗口内本表行数 ≈ 阅读增量」成立，但**不得反过来用本表回算或矫正 `view_count`**（§5.2 那条真源规则不变）：超保留期的行已删，异步写失败的行根本没落库，两处必然对不齐。bot（含空 UA）在写之前就被拒掉，所以本表里没有爬虫行。
 
-**保留期 180 天**：`LogRetentionService` 每天 03:30 执行 `DELETE FROM visit_logs WHERE created_at < NOW() - INTERVAL 180 DAY`（`@Scheduled`，属 Spring 内建能力，business-model.md §5.7 第 5 条允许）。幂等性由谓词本身保证（第二次执行影响 0 行，§5.7）；不建任务执行记录表。后续登录日志的清理并入同一个任务，不再各起一条 cron。
+**保留期 180 天**：`LogRetentionService` 每天 03:30 执行 `DELETE FROM visit_logs WHERE created_at < #{threshold} LIMIT #{batchSize}`，`threshold` 由服务层按业务时区算出（`LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusDays(180)`）当参数绑进——不是 SQL 里的 `NOW() - INTERVAL`，因为 `LIMIT` 分批要服务层循环驱动，阈值也就随之只算一次（`@Scheduled`，属 Spring 内建能力，business-model.md §5.7 第 5 条允许）。幂等性由谓词本身保证（第二次执行影响 0 行，§5.7）；不建任务执行记录表。后续登录日志的清理并入同一个任务，不再各起一条 cron。
 
 **脱敏与检索口径**（后台分析页的唯一出口是 admin 接口）：
 
@@ -437,7 +437,7 @@
 
 ### 4.4 已知的索引代价（如实记录，不要自作优化）
 
-- 定时发布扫描谓词形如 `status='scheduled' AND published_at <= NOW()`，可利用 `idx_status_time`；不为此加生成列。
+- 定时发布扫描谓词形如 `status='scheduled' AND published_at <= NOW()`，可利用 `idx_status_time`；不为此加生成列。`published_at` 是 `TIMESTAMP`，`NOW()` 与它同靠**会话时区**这一个基（§1），会话由连接串显式钉成 `+08:00`，所以谓词不跟着数据库主机漂；换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')` 反而会打破这个对称。
 - `post_tags` 只有 `(post_id, tag_id)` 联合主键，**无 `tag_id` 方向的索引**（已核对 `schema.sql`）。按标签筛选、合并标签（按 `tag_id` 改写关联行）、删标签前清关联都要按 `tag_id` 查，走不到主键最左列。当前量级下可接受，**不新增索引**；要加先给出慢查询证据。
 - 后台草稿列表按 `updated_at` 排序、前台最热列表按**加权衰减表达式**排序（`business-model.md` §3.2「排序参数」），二者都无专属索引。热榜的排序键是每行现算的表达式，**任何索引都命中不了，必然 filesort**；当前量级下可接受，新增索引前先给出慢查询证据。
 - `ft_title_content` 覆盖 `content` 这张 LONGTEXT 列：每次保存文章都要重算该行词元并写进倒排索引与 InnoDB 的 FTS 辅助表，这是**本索引带来的写放大**（换取搜索不再全表扫 LONGTEXT）。索引就在 `docs/schema.sql` 的 `posts` 建表语句里，随全新安装一并建立。库中缺这条索引时，满 2 字的 `MATCH…AGAINST` 直接报 1191，表现为搜索页 500——按口径这属于「库没跟上 `docs/schema.sql`」，清库重建解决，不补增量脚本。
@@ -452,7 +452,7 @@
 
 | 列 | 状态机 | 对外可见性 |
 |---|---|---|
-| `posts.status` | `draft → published`（`published_at` 为空时写 `NOW()`）；`draft → scheduled`（`published_at` = 计划时刻）；`scheduled → published`（调度器到点只改 `status`，不改 `published_at`）；`published → draft`、`scheduled → draft` 允许经编辑器更新接口（`PUT /articles/{id}` 带 `status`）改回 / 撤下，后者清空 `published_at` | `draft` 与 `scheduled` **对外不可见**；读取侧做状态门禁：匿名拒绝，作者本人或 `admin` 放行 |
+| `posts.status` | `draft → published`（`published_at` 为空时由服务层写业务时区的当前时刻）；`draft → scheduled`（`published_at` = 计划时刻）；`scheduled → published`（调度器到点只改 `status`，不改 `published_at`）；`published → draft`、`scheduled → draft` 允许经编辑器更新接口（`PUT /articles/{id}` 带 `status`）改回 / 撤下，后者清空 `published_at` | `draft` 与 `scheduled` **对外不可见**；读取侧做状态门禁：匿名拒绝，作者本人或 `admin` 放行 |
 | `comments.status` | `pending → approved`（`comment_count +1`）；`pending → rejected`（计数不变）；**允许回审**：`approved`/`rejected` → `pending`（`comment_count -1`，下限 0）；提交时的初始状态由 `comment_moderation` 开关与 `banned_words` 词库机审共同决定（§2.10、§2.12、business-model.md §4.4）：**关审核一律 `approved`；开审核先做机审——命中 `action='reject'` 的词直接抛业务异常（400），评论根本不入库、也就没有状态可写；命中 `action='pending'` 的词落 `pending` 待人工裁决，并把首个命中词写进 `comments.hit_word`；未命中直接 `approved`**。计数只在跨越 `approved` 边界时增减；删除评论见 §5.2 | 只有 `approved` 计入 `comment_count` 与前台展示 |
 | `banned_words.is_enabled` | `1 ⇄ 0` | 停用只让机审跳过该词，词条本身与存量评论的 `hit_word` 都不受影响；本表只有博主能读写，无对外可见性问题 |
 | `users.status` | `1 ⇄ 0` | 禁用者仍可匿名读 `published` 内容，但不能评论、点赞、改资料 |
@@ -479,7 +479,7 @@
 
 - 含义是**首次对外可见的时刻**：文章首次成为 `published` 之后不再变化；`scheduled` 期间它是可覆盖的计划时刻，`scheduled → draft` 时清空。
 - `scheduled` 文章存的是**未来**的计划时刻，这是设计而非脏数据。
-- 创建/更新路径：`status='published'` 且原值为空 → 写 `NOW()`；`status='scheduled'` → 写计划时刻（必填且晚于当前时间）；由 `scheduled` 撤下为 `draft` → 清空该值；`draft` 保持期间不动原值。
+- 创建/更新路径：`status='published'` 且原值为空 → 写业务时区的当前时刻；由 `scheduled` 手工转为 `published` 且原值还晚于当前 → 覆写为当前时刻（business-model.md §4.2 第 3 条）；`status='scheduled'` → 写计划时刻（必填且晚于当前时间）；由 `scheduled` 撤下为 `draft` → 清空该值；`draft` 保持期间不动原值。
 - 调度器只把到期的 `scheduled` 改为 `published`，不改写 `published_at`；存量 `published_at` 为空的 `scheduled` 行需人工处理，不由调度器兜底。
 - **未裁决项（不要自行实现）**：管理员在到点前把 `scheduled` 手工改为 `published` 时，`published_at` 仍是未来时刻，前台会显示「发布于 未来」。是否在提前发布时重写 `published_at` 属业务语义选择（`business-model.md` C5 的 D8），**等裁决，本文不定义规则，也不为此加列**。
 
@@ -487,7 +487,7 @@
 
 - **JWT subject 是邮箱，不是用户 id**。因此 `users.email` 的 UNIQUE 兼具冲突判据作用，且修改邮箱后旧 token 的 subject 再也查不到用户 → **改邮箱必须强制重新登录**。不改 subject（会让全站现存 token 一次性失效）。
 - 评论的 `user_id` **只由服务端从安全上下文回填**，请求体携带的值一律覆盖；查不到对应用户时拒绝写入。生成接口时不要留「客户端可传 user_id」的口子。
-- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`，键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**2026-10-03 增量：所有含 `{email}` 的键统一用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §6 增量记录）：
+- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`，键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**2026-10-03 增量：所有含 `{email}` 的键统一用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §3.2「验证码与注册的防刷」）：
   - 码值键 `auth:code:{email}`（注册）、`auth:code-change:{email}`（改邮箱）、`auth:code-reset:{email}`（重置口令）：TTL 5min、一次性消费，命中即删。
   - 发码频控键 `auth:code-limit:{purpose}:{email}`（TTL 60s）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00），频控口径见 business-model.md §3.2。**2026-10-03 增量**：另加两层兜底日额度——`auth:code-ip-daily:{客户端地址}`（每来源地址每日 30 次）与 `auth:code-global-daily`（全站每日 500 次），堵「持邮箱列表绕开邮箱维度发码」的邮件轰炸口子。
   - 防穷举计数键 `auth:code-try:{purpose}:{email}`：首错时设 TTL 5min（与码值键同寿），错满 5 次连带删掉码值键，校验成功时删除。按用途分键，注册码错满不牵连改邮箱码。
@@ -561,7 +561,7 @@
 | `pages` / `nav_menus` / `links`（友情链接）/ `banners` / `ads` / `themes` | 站点级可配置项走 `site_settings` KV；**新配置加键，不加表** |
 | `site_settings` 之外的配置表（如 `configs`、`options`、按域拆分的设置表） | 单表 KV 已覆盖**开关与短文案**；键名与默认值见 §2.10。分界是「一个值 vs 一批要逐条管理的行」：违禁词属后者，故建为 `banned_words`（§2.12）而不是塞进 KV——那既压出 80 词上限，也让「启停一个词」变成改写整串文本 |
 | `tenants` / `blogs`（多站点）/ `sites` | 单博主单站点，无多租户维度，任何表都不加 `tenant_id` |
-| `schema_migrations` / `flyway_schema_history` / `liquibase_changelog` | 全新库由 `schema.sql` 初始化（当前仓库无 Dockerfile / 编排文件，见 business-model.md §3.3）；引入迁移框架是独立工程决策，不在数据库设计内自行添加 |
+| `schema_migrations` / `flyway_schema_history` / `liquibase_changelog` | 全新库由 `schema.sql` 初始化（本机走 `mysql ... < docs/schema.sql`，容器化时同一份文件挂进 MySQL 的 initdb 目录，只在数据目录为空的首次起跑执行——见 business-model.md §3.3「自托管部署」）；引入迁移框架是独立工程决策，不在数据库设计内自行添加 |
 | 审计表（`audit_logs` / `operation_logs`） | 业务未要求操作审计；不要为「后台更安全」自行加审计落库 |
 | SEO 元数据表（任何形态），或把 SEO 三列并进 `posts` | 详情页那三个值是响应时按回落链现算的，落库既没有真源也没有编辑面。原 `seo_meta` 1:1 补充表已于 2026-10-03 删除（§2.8），两个方向都不再建 |
 | `word_hits` / 违禁词命中日志 / 命中计数列 | 命中词就是 `comments.hit_word` 一列值拷贝，一条评论只记**首个**命中词；不做命中统计、不做按词反查评论、不给 `banned_words` 加 `hit_count` |

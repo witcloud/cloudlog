@@ -14,6 +14,10 @@ export interface SiteInfo {
   icpNumber: string
   /** 评论字数上限，0 表示不限制 */
   commentMaxLength: number
+  /** 同一用户两次发评论的最小间隔秒数，0 表示不限制；服务端仍独立校验 */
+  commentIntervalSeconds: number
+  /** 开放注册开关。缺省按「开放」解读：拉不到设置时不该把注册入口藏起来 */
+  registrationEnabled: boolean
 }
 
 /** 站点统计（口径为已发布文章），最近更新为 null 表示全站尚无已发布文章 */

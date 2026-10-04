@@ -50,7 +50,8 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const logout = () => {
-    const hadToken = !!token.value
+    // 先留一份再清：这一枪要带着它去，否则后端按匿名处理，水位推不上去
+    const leavingToken = token.value
     token.value = ''
     userInfo.value = null
     localStorage.removeItem(TOKEN_KEY)
@@ -59,8 +60,8 @@ export const useUserStore = defineStore('user', () => {
     sessionStorage.removeItem(USER_KEY)
     // 服务端同步作废该账号的全部 token（失效水位）：JWT 无状态，只清本地等于 token 仍在有效期。
     // fire-and-forget——本地凭据已清，网络失败不该阻塞登出，也不该为此弹错
-    if (hadToken) {
-      void logoutApi().catch(() => {})
+    if (leavingToken) {
+      void logoutApi(leavingToken).catch(() => {})
     }
     // lastEmail 故意不清：它服务的不是登录态，是「下次进登录页不必重打邮箱」
   }

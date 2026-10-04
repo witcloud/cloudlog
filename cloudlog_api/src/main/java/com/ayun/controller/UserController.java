@@ -3,6 +3,7 @@ package com.ayun.controller;
 import com.ayun.common.Result;
 import com.ayun.dto.EmailChangeRequest;
 import com.ayun.dto.PasswordChangeRequest;
+import com.ayun.dto.SendCodeRequest;
 import com.ayun.dto.UserProfileUpdateDTO;
 import com.ayun.entity.User;
 import com.ayun.model.vo.PageResult;
@@ -69,13 +70,14 @@ public class UserController {
     }
 
     /**
-     * 向待绑定的新邮箱发送修改验证码
+     * 向待绑定的新邮箱发送修改验证码。
+     * 新邮箱走请求体而不是查询参数：这是一次有副作用的写（一封真邮件 + 一次频控占用），
+     * 挂在 URL 上就会进浏览器历史与反代的访问日志（与 SendCodeRequest 那两处同口径）
      */
     @Operation(summary = "发送修改邮箱验证码")
     @PostMapping("/email/code")
-    public Result<Void> sendEmailChangeCode(@Parameter(description = "新邮箱")
-                                            @RequestParam @Email(message = "新邮箱格式不正确") String newEmail) {
-        userService.sendEmailChangeCode(newEmail);
+    public Result<Void> sendEmailChangeCode(@Valid @RequestBody SendCodeRequest request) {
+        userService.sendEmailChangeCode(request.getEmail());
         return Result.success();
     }
 

@@ -4,7 +4,11 @@
 
     <!-- status 谓词同时承担两件事：重复扫描只影响 0 行（幂等），以及已被手工发布的行不会被回退。
          published_at 不在此处改写：scheduled 期间它存的就是计划时刻，即首次对外可见的时刻（db-design.md §5.3）。
-         published_at IS NULL 的存量行在 SQL 三值逻辑下不满足谓词，按 §5.3 交人工处理，不由调度器兜底。 -->
+         published_at IS NULL 的存量行在 SQL 三值逻辑下不满足谓词，按 §5.3 交人工处理，不由调度器兜底。
+         「现在」用 NOW() 而不是写死 +08 偏移量：published_at 是 TIMESTAMP，MySQL 按会话时区换算列值，
+         NOW() 与它天然同基；连接串已把会话显式钉成 +08:00（见 application.yml 与 DataSourceTimeZoneTest）。
+         换成 CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00') 会在会话不是 +08 时凭空造出 8 小时错位，
+         而那时候 NOW() 与列值仍然一起漂、相减为 0 -->
     <update id="publishDueArticles">
         UPDATE posts
         SET status = 'published'

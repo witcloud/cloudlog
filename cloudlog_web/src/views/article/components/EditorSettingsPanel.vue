@@ -1,5 +1,12 @@
 <template>
   <div class="settings-panel">
+    <!-- 分类与标签拉失败时两个下拉是空的，只 console 的话用户看到的下一句是「请选择文章分类」：
+         既不知道原因，也没有第二次机会。这一行把故障说在故障发生的地方 -->
+    <p v-if="optionsFailed" class="settings-notice">
+      分类与标签没有加载出来，与这篇文章无关。
+      <button type="button" class="settings-notice__action" @click="loadOptions">重试</button>
+    </p>
+
     <section class="settings-section">
       <label class="settings-label">分类 <span class="settings-required">*</span></label>
       <el-select
@@ -72,10 +79,16 @@
     <section class="settings-section">
       <label class="settings-label">发布</label>
 
-      <!-- 一行陈述「点主按钮会发生什么」+ 一个切换到另一端的动作；已上线/已下线只陈述状态 -->
+      <!-- 一行陈述「点确认会发生什么」+ 一个切换到另一端的动作；已上线只陈述状态，
+           已下线在上线流里随意图陈述 -->
       <div class="publish-row">
         <span class="publish-state">{{ publishStateLabel }}</span>
-        <button v-if="!isSettled" class="text-action" type="button" @click="toggleSchedule">
+        <button
+          v-if="!isSettled || props.forcePublishMethod"
+          class="text-action"
+          type="button"
+          @click="toggleSchedule"
+        >
           {{ isScheduledIntent ? '立即' : '定时' }}
         </button>
       </div>
@@ -145,6 +158,15 @@ import { UPLOAD_LIMITS, isImageFile } from '@/config/upload'
 const articleStore = useArticleStore()
 const form = articleStore.editArticle
 
+/** 发布抽屉的发布意图：已下线文章走「上线」流时也要露出「立即/定时」二选一，
+    而下方 isSettled 会把它当状态已定隐藏，这里由宿主显式打开 */
+const props = withDefaults(
+  defineProps<{
+    forcePublishMethod?: boolean
+  }>(),
+  { forcePublishMethod: false },
+)
+
 /** EP 默认给 flip 四个候选，而 popper 每次 update 都会重跑 flip（_skip 随 forceUpdate 复位），
    设置栏滚动时选择框上下移，浮层就在 bottom/top 之间来回翻面。只留一个候选即钉死朝下。 */
 const selectFallbackPlacements = ['bottom-start']
@@ -201,6 +223,11 @@ const toggleSchedule = () => {
   }
   // 取消排期：库里已定时的要显式转成即时上线，草稿回到草稿（上线动作仍由主按钮负责）
   form.status = articleStore.dbStatus === 'scheduled' ? 'published' : 'draft'
+  // 两个选择器一并清空（syncScheduleToForm 随之把 form.publishTime 置 null）。
+  // 留着旧时刻的话，再点一次「定时」会回填一个已经过去的时刻，状态行写着
+  // 「将在 <过去> 发布」，而这一枪必然被确认时的校验拒掉
+  scheduleDate.value = ''
+  scheduleTime.value = ''
 }
 
 /**
@@ -242,10 +269,16 @@ const scheduledLabel = computed(() => {
   return dayjs(`${scheduleDate.value} ${scheduleTime.value}`).format('YYYY年M月D日 HH:mm')
 })
 
-/** 状态行：一句话说明「点右上角主按钮会发生什么」，取代原来的「立即/定时」二选一 */
+/** 状态行：一句话说明「点确认/主按钮会发生什么」，取代原来的「立即/定时」二选一 */
 const publishStateLabel = computed(() => {
   if (isLive.value) return publishedAtLabel.value ? `已发布 · ${publishedAtLabel.value}` : '已发布'
-  if (isOffline.value) return '已下线'
+  if (isOffline.value) {
+    // 上线流里按当前意图陈述结果，而不是停在「已下线」
+    if (props.forcePublishMethod) {
+      return isScheduledIntent.value ? '定时上线' : '立即上线'
+    }
+    return '已下线'
+  }
   if (!isScheduledIntent.value) return '立即发布'
   return scheduledLabel.value ? `将在 ${scheduledLabel.value} 发布` : '定时发布'
 })
@@ -257,13 +290,15 @@ const disabledDate = (time: Date) =>
 
 const isScheduledToday = computed(() => scheduleDate.value === beijingNow().format('YYYY-MM-DD'))
 
-/** 选今天时，小时与分钟禁选当前时刻之前 */
+/** 选今天时，小时与分钟禁选当前时刻之前。
+ *  分钟那一档要连当前这一分钟一起禁：拼回去的秒数恒为 :00（见 syncScheduleToForm），
+ *  15:07:20 选 15:07 得到的是 15:07:00，已经过去了 20 秒，必然被「需晚于当前时间」拒掉 */
 const disabledHours = () =>
   isScheduledToday.value ? Array.from({ length: beijingNow().hour() }, (_, i) => i) : []
 
 const disabledMinutes = (hour: number) =>
   isScheduledToday.value && hour === beijingNow().hour()
-    ? Array.from({ length: beijingNow().minute() }, (_, i) => i)
+    ? Array.from({ length: beijingNow().minute() + 1 }, (_, i) => i)
     : []
 
 const categories = ref<Category[]>([])
@@ -299,15 +334,22 @@ onUnmounted(() => {
   }
 })
 
-onMounted(async () => {
+/** 面板顶部的故障行：只在拉不到分类/标签时出现，成功即收起 */
+const optionsFailed = ref(false)
+
+const loadOptions = async () => {
+  optionsFailed.value = false
   try {
     const [catRes, tagRes] = await Promise.all([getCategories(), getTags()])
     categories.value = catRes.data
     tags.value = tagRes.data
   } catch (error) {
     console.error('Failed to fetch categories/tags:', error)
+    optionsFailed.value = true
   }
-})
+}
+
+onMounted(loadOptions)
 
 const triggerUpload = () => {
   fileInput.value?.click()
@@ -431,6 +473,33 @@ const handleStatusAction = async () => {
   display: flex;
   flex-direction: column;
   padding: var(--space-md);
+}
+
+/* 故障行：面板顶上一条，用凹陷面与警示描边，不占分类那一段的视觉位 */
+.settings-notice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+  padding: var(--space-2xs) var(--space-sm);
+  border-left: 2px solid var(--color-warning);
+  background-color: var(--color-paper-3);
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+
+  &__action {
+    border: 0;
+    padding: 0;
+    background: none;
+    font-size: inherit;
+    color: var(--color-accent-ink);
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+      text-underline-offset: 0.25em;
+    }
+  }
 }
 
 .settings-section {

@@ -23,16 +23,20 @@
         <el-button
           type="primary"
           :loading="submitting"
-          :disabled="!newComment.trim()"
+          :disabled="!newComment.trim() || cooldownLeft > 0"
           @click="submitComment()"
         >
-          提交评论
+          {{ cooldownLeft > 0 ? `请 ${cooldownLeft} 秒后再发` : '提交评论' }}
         </el-button>
       </div>
     </div>
 
     <div v-loading="loading" class="comments__area">
-      <p v-if="loadFailed" class="comments__empty">评论加载失败，请刷新页面重试。</p>
+      <!-- 本地就有 loadComments()，不该把人支去刷新整页 -->
+      <p v-if="loadFailed" class="comments__empty">
+        评论加载失败。
+        <button type="button" class="comments__retry" @click="loadComments">重试</button>
+      </p>
 
       <ul v-else-if="threads.length" class="comments__list">
         <li v-for="thread in threads" :key="thread.id" class="comments__thread">
@@ -112,10 +116,10 @@
                 size="small"
                 type="primary"
                 :loading="submitting"
-                :disabled="!replyContent.trim()"
+                :disabled="!replyContent.trim() || cooldownLeft > 0"
                 @click="submitComment(thread.id)"
               >
-                发布回复
+                {{ cooldownLeft > 0 ? `请 ${cooldownLeft} 秒后再发` : '发布回复' }}
               </el-button>
             </div>
           </div>
@@ -128,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
@@ -158,6 +162,34 @@ const siteStore = useSiteStore()
 
 /** 限长以后端配置为准：0 表示不限制，此时不传 maxlength，字数提示也随之不出现 */
 const wordLimit = computed(() => siteStore.commentMaxLength || undefined)
+
+/**
+ * 发布间隔倒计时。服务端对同一用户有最小发布间隔（随公开设置下发，缺省 60 秒），
+ * 不显示的话按钮发完立刻又能点，第二发只能撞「评论发得太快」那条红字——
+ * 而还剩几秒这件事，系统一开始就知道。
+ */
+const cooldownLeft = ref(0)
+let cooldownTimer: ReturnType<typeof setInterval> | null = null
+
+const stopCooldown = () => {
+  if (cooldownTimer) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
+}
+
+const startCooldown = () => {
+  const seconds = siteStore.commentIntervalSeconds
+  if (!seconds) return
+  cooldownLeft.value = seconds
+  stopCooldown()
+  cooldownTimer = setInterval(() => {
+    cooldownLeft.value -= 1
+    if (cooldownLeft.value <= 0) stopCooldown()
+  }, 1000)
+}
+
+onUnmounted(stopCooldown)
 
 const comments = ref<Comment[]>([])
 const loading = ref(false)
@@ -237,6 +269,8 @@ const submitComment = async (parentId = 0) => {
   try {
     // 最终 status 以服务端返回为准，不以「重新拉取后是否多出一条」反推（business-model.md §4.4 第 4 条）
     const res = await addComment({ postId: props.postId, content, parentId })
+    // 过审与转待审都已在服务端落库、都占这一次间隔，所以两条路一起进倒计时
+    startCooldown()
     if (parentId === 0) newComment.value = ''
     else {
       replyingTo.value = null
@@ -379,9 +413,10 @@ watch(
 }
 
 .comments__text {
-  margin-top: var(--space-3xs);
-  font-size: var(--text-sm);
-  line-height: 1.7;
+  /* 评论是用户生成的正文级内容，13px 压不住场，升正文字号（掘金评论 ≥14px） */
+  margin-top: var(--space-2xs);
+  font-size: var(--text-base);
+  line-height: 1.75;
   color: var(--color-ink-2);
   white-space: pre-wrap;
 }
@@ -391,6 +426,11 @@ watch(
 }
 
 .comments__tool {
+  /* 它是「回复」的唯一入口。评论行里放一颗 44px 的按钮会把整行撑散，
+     所以按最小命中档（24×24）收，而不是照抄表单按钮那一档 */
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   padding: 0;
   border: none;
   background: none;
@@ -414,5 +454,20 @@ watch(
   text-align: center;
   font-size: var(--text-sm);
   color: var(--color-ink-4);
+}
+
+/* 失败态里那颗重试：跟这行字同档，不自带控件外观 */
+.comments__retry {
+  border: 0;
+  padding: 0;
+  background: none;
+  font-size: inherit;
+  color: var(--color-accent-ink);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.25em;
+  }
 }
 </style>
