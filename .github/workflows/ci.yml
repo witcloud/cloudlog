@@ -35,7 +35,7 @@ jobs:
     env:
       # application.yml 不入库：先从 example 复制一份占位配置，再凭据经环境变量覆盖指向 CI 的服务容器；
       # SMTP 只被 mock，不会外发邮件
-      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root
       SPRING_DATA_REDIS_HOST: 127.0.0.1
@@ -55,7 +55,7 @@ jobs:
         run: mvn -B test
 
   frontend:
-    name: 前端类型检查与构建
+    name: 前端测试与构建
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +67,9 @@ jobs:
       - name: 安装依赖
         working-directory: cloudlog_web
         run: npm ci
+      - name: 测试
+        working-directory: cloudlog_web
+        run: npm run test
       - name: 类型检查与构建
         working-directory: cloudlog_web
         run: npm run build
