@@ -81,7 +81,9 @@ class VisitLogMapperTest {
         LocalDateTime stored = jdbcTemplate.queryForObject(
                 "SELECT created_at FROM visit_logs WHERE ip = ?", LocalDateTime.class, TEST_IP_PREFIX + "7.7");
         assertNotNull(stored);
-        assertTrue(stored.isAfter(LocalDateTime.now().minusMinutes(1)), "created_at 应当是刚刚，实际为 " + stored);
+        // 基取会话的 NOW() 而不是 JVM now()：这一列由库默认值在会话时区上生成，混基会让这条在 UTC 机器上恒真
+        LocalDateTime sessionNow = jdbcTemplate.queryForObject("SELECT NOW()", LocalDateTime.class);
+        assertTrue(stored.isAfter(sessionNow.minusMinutes(1)), "created_at 应当是刚刚，实际为 " + stored);
     }
 
     @Test

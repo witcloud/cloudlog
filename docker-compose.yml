@@ -20,7 +20,8 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       # 只在数据目录为空的首次启动执行；schema.sql 是库结构唯一真源（docs/db-design.md §1.1.1），
-      # 它只含建表 DDL、不含 CREATE DATABASE，建库由上面的 MYSQL_DATABASE 负责
+      # 它只含建表 DDL、不含 CREATE DATABASE，建库由上面的 MYSQL_DATABASE 负责。
+      # 演示数据 docs/data.sql 有意不挂载：生产卷不该自带演示内容，需要时按 README 手工导入
       - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       # $$ 是给 compose 转义用的：真正的取值由容器内的 shell 展开，避免密码出现在编排文件里

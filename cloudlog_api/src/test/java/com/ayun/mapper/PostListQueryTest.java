@@ -5,6 +5,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -18,10 +20,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 这条只能对真库跑——列清单是 SQL 里的事，mock 不出来
  */
 @SpringBootTest
+@Transactional
 class PostListQueryTest {
+
+    private static final long SEEDED_POST = 7123456789012345699L;
 
     @Autowired
     private PostMapper postMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     @DisplayName("findAllBrief 返回的行不带正文，标题/分类/三个计数照常映射")
@@ -61,6 +69,22 @@ class PostListQueryTest {
         List<Post> matched = postMapper.findAllBrief(null, null, null, oneChar, "latest");
 
         assertFalse(matched.isEmpty(), "单字搜索必须由 LIKE 兜住，实际搜的是「" + oneChar + "」");
+    }
+
+    @Test
+    @DisplayName("含英文的关键词退回 LIKE：标题里的「Mac」必须搜得到——ngram 停用词把 a/i 当分隔符，MATCH 分支必然 0 命中")
+    void asciiKeywordFallsBackToLike() {
+        // 造数自带 Mac，不依赖本地库碰巧有一篇英文标题的文章；事务回滚，不污染真实数据
+        jdbcTemplate.update(
+                "INSERT INTO posts (id, title, content, author_id, status) VALUES (?, ?, ?, ?, 'published')",
+                SEEDED_POST, "我的 Mac 开发环境配置", "正文里也写到了 macOS 的日常使用。", 1800000000000000001L);
+
+        List<Post> matched = postMapper.findAllBrief(null, null, null, "Mac", "latest");
+
+        assertTrue(matched.stream().anyMatch(post -> post.getId() == SEEDED_POST),
+                "搜「Mac」必须命中标题含 Mac 的文章，实际命中 " + matched.size() + " 篇："
+                        + matched.stream().map(Post::getTitle).toList());
+        assertNull(matched.get(0).getContent(), "搜索结果同样不带正文");
     }
 
     @Test

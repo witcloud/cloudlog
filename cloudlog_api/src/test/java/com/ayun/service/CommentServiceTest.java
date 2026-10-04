@@ -292,7 +292,8 @@ class CommentServiceTest {
     void addCommentWithinIntervalIsRefused() {
         loginAsReader();
         publishedPostExists();
-        when(commentMapper.findLastCreatedAtByUserId(88L)).thenReturn(LocalDateTime.now().minusSeconds(30));
+        when(commentMapper.findLastCreatedAtByUserId(88L))
+                .thenReturn(LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusSeconds(30));
 
         RuntimeException error = assertThrows(RuntimeException.class, () -> commentService.addComment(
                 Comment.builder().postId(1L).content("再刷一条").build()));
@@ -313,11 +314,13 @@ class CommentServiceTest {
         // 这条回复的目标本身是合法的，让用例真正测到的是间隔而不是父评论校验
         parentComment(7, 1L, "approved", 0);
         // 最近一条是三十秒前落库的待审评论：它没展示出来，但一样占住间隔
-        when(commentMapper.findLastCreatedAtByUserId(88L)).thenReturn(LocalDateTime.now().minusSeconds(30));
+        when(commentMapper.findLastCreatedAtByUserId(88L))
+                .thenReturn(LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusSeconds(30));
         assertThrows(RuntimeException.class,
                 () -> commentService.addComment(Comment.builder().postId(1L).content("回复").parentId(7).build()));
 
-        when(commentMapper.findLastCreatedAtByUserId(88L)).thenReturn(LocalDateTime.now().minusSeconds(61));
+        when(commentMapper.findLastCreatedAtByUserId(88L))
+                .thenReturn(LocalDateTime.now(ArticleService.BUSINESS_ZONE).minusSeconds(61));
         assertEquals("approved",
                 commentService.addComment(Comment.builder().postId(1L).content("过了间隔再发").build()));
     }

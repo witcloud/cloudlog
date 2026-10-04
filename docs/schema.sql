@@ -1,6 +1,8 @@
 -- CloudLog 数据库唯一真源：全新安装直接执行本文件（只含建表 DDL，需先自行 CREATE DATABASE 并 USE 到目标库）
 -- 变更口径：开发阶段直接改本文件并清库重建，不维护面向存量库的增量升级脚本（见 docs/db-design.md §1.1.1）
--- 环境：MySQL 8 / InnoDB / utf8mb4；全文索引依赖 ngram 分词器，ngram_token_size 默认 2，单字关键词由搜索侧退回 LIKE
+-- 环境：MySQL 8 / InnoDB / utf8mb4；全文索引依赖 ngram 分词器，ngram_token_size 默认 2；
+-- 默认停用词表的单字母 a/i 会被 ngram 当成分隔符，含英文/符号的关键词切不出词元，所以搜索侧只把
+-- 不含 ASCII 字母与符号的关键词交给全文索引，其余（连同单字关键词）退回 LIKE，见 PostMapper.xml findAllBrief
 
 -- 1. 用户表
 CREATE TABLE `users` (
@@ -62,7 +64,9 @@ CREATE TABLE `posts` (
   KEY `idx_category` (`category_id`),
   KEY `idx_status_time` (`status`, `published_at`),
   -- 标题与正文的全文索引，用 ngram 分词支持中文（依赖 ngram_token_size，MySQL 8 默认 2，
-  -- 所以单个汉字的词进不了索引——搜索侧对 1 字符关键词仍退回 LIKE，见 PostMapper.xml findAllBrief）
+  -- 单个汉字的词进不了索引；默认停用词表的单字母 a/i 还会被当成分隔符，含英文/符号的关键词
+  -- 同样切不出词元——搜索侧只把不含 ASCII 字母与符号的关键词交给 MATCH，其余退回 LIKE，
+  -- 判定见 com.ayun.common.FulltextKeywordUtils 与 PostMapper.xml findAllBrief）
   FULLTEXT KEY `ft_title_content` (`title`, `content`) WITH PARSER ngram
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文章表';
 

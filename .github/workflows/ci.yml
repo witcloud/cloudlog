@@ -35,7 +35,7 @@ jobs:
     env:
       # application.yml 不入库：先从 example 复制一份占位配置，再凭据经环境变量覆盖指向 CI 的服务容器；
       # SMTP 只被 mock，不会外发邮件
-      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/cloudlog?useUnicode=true&characterEncoding=utf-8&useSSL=false&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root
       SPRING_DATA_REDIS_HOST: 127.0.0.1
@@ -50,12 +50,19 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      # 服务容器起的 cloudlog 是空库，而 mapper 与过滤链那批用例读的是库里已有的行：
+      # 只导 schema.sql 实测红 21 条（CommentGuard/CommentList/PostList/SeoPublic/VisitLog/TokenRevocation 六个类），
+      # schema.sql + data.sql 一起导实测 352/352 全绿。data.sql 在这里是 fixture，不是演示数据
+      - name: 导入库结构与测试数据（docs/schema.sql 是结构唯一真源）
+        run: |
+          mysql --default-character-set=utf8mb4 -h 127.0.0.1 -uroot -proot cloudlog < docs/schema.sql
+          mysql --default-character-set=utf8mb4 -h 127.0.0.1 -uroot -proot cloudlog < docs/data.sql
       - name: 测试
         working-directory: cloudlog_api
         run: mvn -B test
 
   frontend:
-    name: 前端类型检查与构建
+    name: 前端测试与构建
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +74,9 @@ jobs:
       - name: 安装依赖
         working-directory: cloudlog_web
         run: npm ci
+      - name: 测试
+        working-directory: cloudlog_web
+        run: npm run test
       - name: 类型检查与构建
         working-directory: cloudlog_web
         run: npm run build
