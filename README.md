@@ -21,19 +21,20 @@ cloudlog/
 
 ## 功能概览
 
-- 用户注册 / 登录（邮箱验证码）、找回密码，角色分为博主（admin）与普通用户
+- 用户注册 / 登录（邮箱验证码）、找回密码、登录时「记住我」决定 token 落 `localStorage` 还是 `sessionStorage`，角色分为博主（admin）与普通用户
 - 文章管理：Markdown 编辑、草稿箱、定时发布、发布、分类、标签（含合并）、置顶、阅读量统计
 - 文章状态四态：`draft` / `published` / `scheduled` / `offline`；`offline`（已下线）仅作者与管理员可见，读者访问一律按不存在处理（404）
 - 列表排序 `sort` 三档：`latest`（接口缺省值，发布时间倒序，搜索页与作者主页走这档）、`recommended`（热度加权，首页默认展示档）、`popular`（纯热度，侧栏热榜专用）；热度 = 阅读 + 点赞×3 + 评论×5，并按发布天数衰减
 - 置顶文章在 `latest` / `recommended` 下恒定排在前，多篇置顶之间按 `top_order` 权重从大到小
-- 互动：评论（两级回复，违禁词机审 + 人工审核）、点赞、关注作者（个人主页含关注/粉丝/点赞列表）
-- 站点运营：后台文章/评论/分类/标签/用户管理、站点开关、关于页文案配置、文章级 SEO 元数据（详情页的标题/描述/关键词，未填项按文章标题、摘要、标签名回退）、访问日志（概览/趋势/Top 榜/明细，来源地址脱敏）
+- 互动：评论（两级回复，违禁词机审 + 人工审核）、点赞、关注作者；**作者主页 `/authors/:id` 四栏（TA 的文章 / 关注中 / 粉丝 / 点赞）公开可读**，名单行只出头像/昵称/简介/职业，不含邮箱与角色（`docs/business-model.md` §3.2、§4.7）
+- 站点运营：后台文章/评论/分类/标签/用户管理、站点开关、评论字数上限与发布间隔、站点信息（名称/备案号/域名）、关于页文案配置、访问日志与登录日志（概览/趋势/Top 榜/明细，来源地址一律脱敏成 `112.10.*.*`）
+- 详情页的标题/描述/关键词由服务端按回落链**合成**（标题拼站点名、描述取摘要、关键词取标签名），**没有手填入口**——`seo_meta` 表与后台「待补全 SEO」清单已于 2026-10-03 整条删除（`docs/business-model.md` §2.10）；`robots.txt` / `sitemap.xml` / `feed.xml` 由后端直出
 - 登录日志：后台可查登录成败与爆破尝试（概览 / 攻击 Top 榜 / 明细，来源地址脱敏），锁定阈值与时长在后台可调（默认 5 次 / 15 分钟）
 - 图片存储基于 MinIO（文章配图、封面与头像上传）
 
 ## 技术栈
 
-- **前端（cloudlog_web/）**：Vue 3、TypeScript、Vite、Pinia、Vue Router、Element Plus、Axios、Sass、Vditor（编辑）、md-editor-v3（预览）、dayjs（时间格式化）、nprogress（导航进度条）、qrcode-generator（分享二维码本地生成）、@fontsource（自托管字体）
+- **前端（cloudlog_web/）**：Vue 3、TypeScript、Vite、Pinia、Vue Router、Element Plus、Axios、Sass、Vditor（编辑）、md-editor-v3（预览）、dayjs（时间格式化）、nprogress（导航进度条）、qrcode-generator（分享二维码本地生成）、markdown-it（把正文切成块以定位插图与目录）、dompurify（富文本进 DOM 前净化）、lodash-es（搜索输入防抖）、@fontsource（自托管字体）；构建期用 unplugin-vue-components 做按需注册
 - **后端（cloudlog_api/）**：Java 21、Spring Boot 3.5、Spring Security + JWT、MyBatis + PageHelper、MySQL 8、Redis、MinIO、SpringDoc OpenAPI、JavaMail（邮箱验证码与找回密码）、Hutool（雪花 ID）
 
 ## 快速开始
@@ -41,7 +42,7 @@ cloudlog/
 ### 1. 准备依赖服务
 
 - MySQL 8.0+
-- Redis 6.0+（只放验证码、频控与阅读去重这类短时键，空实例即可，无需初始化数据）
+- Redis 6.0+（只放短时键：验证码与发码频控、登录失败计数两层、token 失效水位、阅读去重、上传日额度；空实例即可，无需初始化数据。**没有 RDB/AOF 也不影响功能**，但重建 Redis 会让本该作废的旧 token 复活，见「容器化部署」一节第 3 条）
 - MinIO（仅图片上传需要，可选）
 
 建库并导入表结构，在仓库根目录执行：
@@ -89,7 +90,9 @@ npm run dev
 
 ### 4. 注册账号并提升为首任博主
 
-打开前台注册一个账号，再把它提成博主。这一步是必需的：注册接口固定写 `role = 'user'`（`AuthService.java:96`），后台的用户管理只有列表与启用/禁用两项、改不了角色（`AdminUserController`），`docs/schema.sql` 也不预置任何账号——所以首个以及此后每一个管理员都要这样手工提升，界面上没有入口。（例外：若第 1 步导入了演示数据 `docs/data.sql`，库里已有现成博主 `tcloud@example.com`，密码 `123456`，本步可跳过。）
+打开前台注册一个账号，再把它提成博主。这一步是必需的：注册接口固定写 `role = 'user'`（`AuthService.register`），后台的用户管理只有列表与启用/禁用两项、改不了角色（`AdminUserController`），`docs/schema.sql` 也不预置任何账号——所以首个以及此后每一个管理员都要这样手工提升，界面上没有入口。（例外：若第 1 步导入了演示数据 `docs/data.sql`，库里已有现成博主 `tcloud@example.com`，密码 `123456`，本步可跳过。）
+
+> 文档里引用代码一律写**类名.方法名**，不写 `文件:行号`——行号会随着任何一次上下移动而失真，这里曾经就指偏过十几行。
 
 ```bash
 mysql -u root -p cloudlog -e "UPDATE users SET role = 'admin' WHERE email = '你的注册邮箱'"
@@ -240,4 +243,4 @@ find /var/backups/cloudlog -name '*.sql.gz' -mtime +14 -delete
 
 ## 持续集成
 
-`.github/workflows/ci.yml` 在每次 push/PR 时跑两件事：后端全量测试（临时 MySQL + Redis 服务容器，凭据经环境变量覆盖）、前端 type-check 与构建。合并前绿灯是硬门槛——本仓有 300+ 后端测试，本地跑一遍不便宜，交给 CI 兜底。
+`.github/workflows/ci.yml` 在每次 push/PR 时跑两件事：**后端**用临时 MySQL + Redis 服务容器（凭据经环境变量覆盖，测试前依次导入 `docs/schema.sql` 与 `docs/data.sql`——后者在这里承担 fixture 角色，只导结构会红 21 条）跑 `mvn -B test`；**前端**依次 `npm ci` → `npm run test`（vitest）→ `npm run build`（`build` 脚本本身 `run-p type-check build-only`，所以类型检查在构建里跑）。合并前绿灯是硬门槛——后端全量测试三百余项、前端十余项用例（**具体数目随用例增删在变，以 `docs/business-model.md` §3.3 的当轮记录为准**），本地跑一遍不便宜，交给 CI 兜底。

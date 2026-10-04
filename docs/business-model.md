@@ -45,8 +45,10 @@ User 1─N Follow N─1 User（读者 → 作者，单向表态）
 | username | 显示名，唯一 | 用户可自行修改 |
 | avatar | 头像地址 | 上传后落库的是**含域名的完整 URL**，不是相对路径 |
 | bio | 个人简介 | 用户可自行修改 |
-| role | 角色 | `admin`（博主）/ `user`（读者），默认 `user`；注册接口恒写 `user`，提级只能由 DB 操作完成（当前后台无角色管理功能，见 §4.6） |
-| status | 账号启停 | `1` 正常 / `0` 禁用；禁用**即时生效**（每次带 token 的请求都回库重载用户），无需 token 黑名单 |
+| occupation | 职业 | 一句话身份说明（列宽 30），用户可自行修改，与 `bio` 同一条资料更新接口；他人主页、作者卡、后台用户弹窗与关注/粉丝名单的行都读它，为空就不显示那一行 |
+| role | 角色 | `admin`（博主）/ `user`（读者），默认 `user`；注册接口恒写 `user`（`AuthService.register`），提级只能由 DB 操作完成（当前后台无角色管理功能，见 §4.6） |
+| status | 账号启停 | `1` 正常 / `0` 禁用；禁用**即时生效**（每次带 token 的请求都回库重载用户），无需 token 黑名单。它挡的是这个人自己的读写与登录（评论、点赞、改资料、进后台），**不把他从他人的粉丝名单和 `/authors/:id` 主页上撤下**——名单与主页都不按 `status` 过滤，现状与理由记在文末 §6 |
+| last_login_at / last_login_ip | 上次登录 | 只在 `login()` 的成功出口写（与 `login_logs` 的 `success` 那一行同刻），失败与锁定都不动它；`NULL` = 从未登录。时间经 `/user/profile` 下发给本人，**地址带 `@JsonIgnore` 不经任何前台接口出**，只在后台用户列表里以脱敏形（`db-design.md` §2.9 那一套 `IpMaskUtils.mask()`）出现 |
 
 用户可自行修改：`username` 与 `bio` 走资料更新接口，不必复核口令；`email` 与 `password` 各走一条独立的改绑流程，两条都要求先校验当前口令，且**成功即作废本次会话、必须重新登录**（改邮箱是因为 subject 变了、旧 token 查不到用户，见本表 `email` 行与 §3.3；改口令是邮箱没变、旧 token 仍验得过签名，只能靠失效水位，见 §5.5）。头像走上传接口。`role`、`status` 不由用户自助修改。
 
@@ -98,6 +100,10 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 |---|---|---|
 | `comment_moderation` | `true` | 开启时新评论先经违禁词库机审（词库见 §2.9）：命中 `reject` 词直接拒绝，命中 `pending` 词落待审，未命中直接 `approved`；**关闭时一律直接 `approved`，机审整个跳过**——包括 `reject` 词，这个开关是机审与人工审核的总闸 |
 | `registration_enabled` | `true` | 关闭时注册接口直接拒绝，**已在注册逻辑最前处校验** |
+| `comment_max_length` | `500` | 单条评论的字数上限，`0` = 不限制（合法 0–5000）。前台评论框按它限长、服务端同样按它校验，两处都从公开 `GET /site/settings` 拿到同一个值——上限只写一处，前端不抄第二份数字 |
+| `comment_interval_seconds` | `60` | 同一个人连续两次发评论（含回复）之间要等的秒数，`0` = 不限制（合法 0–86400）。判定读 `comments` 里该用户最近一次评论时刻（`findLastCreatedAtByUserId`），"现在"取业务时区墙钟（§5.4） |
+
+上表是**改变运行行为**的那几条；键的全量清单、代码侧默认值与「库里缺行 = 用代码默认」的口径以 `db-design.md` §2.10 为字段级真源（`site_name` / `icp_number` / `site_url` / `about_*` 四键 / 登录锁定两键都记在那里）。两键的读写不对称（读取夹紧、保存越界 400）见 §2.12。
 
 新增**开关**的先例即扩展这张表的键，不新建配置表。但这张表只承载「一个值」型配置（开关、短文案），**不承载需要逐条管理的内容数据**——逐条管理的内容落独立表，违禁词库 `banned_words` 即按此分界独立成表（§2.9）。分界口径写在 db-design.md §6。
 
@@ -188,7 +194,7 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 | 写失败 | 只记一条 error 日志。**绝不影响登录接口**：日志库挂了也不该让一次口令错误变成 500，更不该改口提示 |
 | 保留期 | 180 天，并入 §2.11 那条 `LogRetentionService` 的同一任务，不另起调度表 |
 
-**锁定策略（后台可调）**：计数键是 `auth:login-fail:{email}:{客户端地址}`，两个参数放在 `site_settings`——`login_max_failures`（默认 5，合法 3–10）、`login_lock_minutes`（默认 15，合法 5–60）。四条口径都是有意选的，不要「顺手」改：
+**锁定策略（后台可调）**：计数是**两层键**——来源地址层 `auth:login-fail:{email}:{客户端地址}` 与邮箱层 `auth:login-fail-global:{email}`（不带地址，阈值 = 地址层配置值 × 5 但不低于 20；只有地址层时轮换来源地址就能对同一邮箱无限试口令，邮箱层堵这条，20 的下限则防「阈值调到 3」把共享出口下的正常用户一起锁死）。两个参数放在 `site_settings`——`login_max_failures`（默认 5，合法 3–10）、`login_lock_minutes`（默认 15，合法 5–60），**两层共用同一个时长与同一套阈值换算**。四条口径都是有意选的，不要「顺手」改：
 
 1. **读取夹紧、保存拒绝**。库里可能被手改成 999 或 0：登录链路读到时夹回区间内（一个脏值不该把登录接口顶成 500，也不该等于「不锁」），而后台保存越界直接 400（保存是明确动作，把 120 分钟悄悄改成 60 会让人以为没生效）。
 2. **`login()` 进入时读一次并向下传**，不在每个分支各查一遍。
@@ -209,7 +215,7 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 
 | 功能 | 语义 | 现状 |
 |---|---|---|
-| 注册 / 登录 | 邮箱验证码注册 + 口令登录，签发 JWT | 已实现 |
+| 注册 / 登录 | 邮箱验证码注册 + 口令登录，签发 JWT | 已实现（**「记住我」决定 token 落点**：勾选写 `localStorage`（活到 JWT 自然过期），不勾写 `sessionStorage`（关掉标签页即失效），复选框**默认勾选**；该选择只是本地存储位置的差别，不改变服务端签发的 token 本身，也不进登录请求体。`POST /auth/login` 的入参始终只有邮箱与口令） |
 | 文章写作 | Markdown 编辑、插图与封面上传、30s 静默自动保存 | 已实现（草稿免分类；发布与定时发布要求已选分类，前后端双重强制） |
 | 文章生命周期 | 草稿 / 立即发布 / 定时发布 / 下线四态与状态机 | 已实现（调度器每分钟扫描到期 `scheduled` 行，见 §3.2「定时发布执行」；`published_at` 各流转语义见 §4.2） |
 | 内容可见性控制 | 非 `published` 内容对匿名拒绝、对作者与博主放行 | 已实现 |
@@ -232,6 +238,9 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 |---|---|---|
 | 定时发布执行 | `scheduled` 文章到点自动转 `published` | 已实现（`ScheduledPublishService` 每分钟第 0 秒扫描，SQL 谓词 `status='scheduled' AND published_at <= NOW()` 自带幂等。**这里的 `NOW()` 不是漏改**：`published_at` 是 `TIMESTAMP` 列，MySQL 读写都按**会话时区**换算，`NOW()` 取的也是同一个会话钟，两者天然同基；会话由连接串显式钉成 +08:00（`connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true`，实际值由 `DataSourceTimeZoneTest` 断言），所以到点发放不跟着数据库主机漂。反过来把它换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00')` 会打破这个对称：会话一旦不是 +08，列值跟着漂而写死的基准不漂，谓词就凭空差 8 小时。`published_at IS NULL` 的存量行按三值逻辑不命中，需人工处理，不由调度器兜底。创建与更新接口均接收 `publishTime`，格式 `yyyy-MM-dd HH:mm:ss`） |
 | 用户启停 | 博主禁用/恢复读者账号，即时生效 | 已实现（含保护：不允许禁用管理员、不允许禁用当前登录账号） |
+| 找回密码 | 邮箱 + 验证码 + 新口令，凭码重置口令 | 已实现（`POST /auth/password/code` + `POST /auth/password/reset`，复用本节「验证码与注册的防刷」那整套频控与穷举保护，`purpose` 取 `password-reset`。**两条出口都不给出账号存在性**：发码对未注册邮箱静默跳过、响应照旧成功；重置对未注册邮箱报「验证码错误或已过期」。写库只带 `id` 与 `password` 两列（通用 update 跳过 null，等于只改这一列），随即 `revokeBeforeNow(email)` 推失效水位作废改密前签发的 token（§5.5）。前端成功后给一次性提示「密码已重置，请用新密码登录」并跳登录页、把邮箱带进 query 回填） |
+| 评论防护 | 单条字数上限 + 同人发布间隔，后台可调 | 已实现（两键见 §2.6。公开 `GET /site/settings` 一次把 `commentMaxLength` / `commentIntervalSeconds` 下发给评论框，服务端在写入前用同一对值再校验一次——**上限只写在 `SettingsService`，前端不抄第二份数字**；`0` 一律表示不限制。越界值读取时夹回合法区间、后台保存越界直接 400，同 §2.12 那条读写不对称） |
+| 作者主页 | 任何用户的公开主页，四栏：TA 的文章 / 关注中 / 粉丝 / 点赞 | 已实现（`GET /users/{id}/profile` 与三条分页读端点 `GET /users/{id}/following`、`/followers`、`/liked-posts`，**全部匿名可达**，挂在 `/users` 前缀下由过滤链「其余一律要求登录」之外的显式规则兜住（§5.5）。`UserBriefVO` 只出 `id` / `用户名` / `头像` / `简介` / `职业` 五列（另加 `followed` / `followsMe` 两枚布尔，只表示**浏览者与这一行的关系**，匿名为 `null` 而非 `false`），**不含邮箱、角色、状态**；id 不存在回 404「用户不存在或已注销」，与关注接口同一句话；页头那三格里，文章与阅读按该用户全部 `published` 文章即时聚合（`findAuthorStats`），粉丝按 `follows` 实际条数即时计数；TA 点赞过的文章同样只出 `published`（复用 `findLikedByUser`，本人视角与他人视角同一条件句）。入口有三处：评论者姓名、文章头作者、首页与详情页的作者卡。边界见 §4.7 与 §6） |
 | 文章删除路径一致性 | 所有删除文章的路径共用同一个级联实现（§5.7 第 7 条） | 已实现（级联唯一实现在 `ArticleService` 内部：`cascadeDelete` 按 `post_tags` → `likes` → `comments` → `posts` 顺序先删子行再删主行；`deletePost`（前台/后台共用，后台 `AdminArticleService.deleteArticle` 委托它）、`deleteDraft`、`clearDrafts` 三条路径都复用它。`deleteDraft` 先经 SQL 属主谓词（`id + author_id + 状态为草稿/定时`）确认，再进级联。`comments` 按 `post_id` 整体删，根评论与其回复一并清理。被删文章的封面与正文配图随级联进入对象回收（§3.3「图片对象回收」）） |
 | 草稿箱 | 列出自己的草稿与定时文章、单条删除、一键清空 | 已实现（单条删除与清空都走 §5.7 第 7 条的级联实现，不遗留子行孤儿；属主校验在 SQL 谓词内） |
 | 站内搜索 | 关键词命中标题或正文 | 已实现（复用列表接口。按关键词构成分岔，条件收敛在 `FulltextKeywordUtils.isIndexable`：不含 ASCII 字母与符号、满 2 字的关键词走 `posts` 上 `title+content` 的 ngram 全文索引（`MATCH…AGAINST` 布尔模式，关键词整体加引号当短语、内嵌双引号被摘掉，避免 `+ - * " ( )` 被解释成运算符），其余退回 `LIKE`——ngram 词元是两个字符，单字进不了索引；且默认停用词表的单字母 `a`/`i` 会被 ngram 当分隔符，含英文/符号（"Mac"、"C++"）或恰为双字符停用词（of/to）的关键词切不出词元，走 MATCH 必然 0 命中，只能退回子串语义的 LIKE。索引决策与代价见 `db-design.md` §4.1/§4.3/§4.4；索引随 `docs/schema.sql` 的 `posts` 建表语句一并建立，库里缺它时走 MATCH 分支的搜索会报 1191） |
@@ -241,12 +250,12 @@ KV 结构，缺省值内置于服务层，未配置即按默认生效。与运�
 | 访问统计 | 后台看文章访问的概览、趋势、Top 榜与明细 | 已实现（写入挂在详情页的阅读量判据上、`@Async` 落库，bot 不写，保留 180 天，规则见 §2.11；入口是「日志管理 → 访问日志」，仅博主可达；**完整 IP 不出现在任何响应里**（后端脱敏成 `112.10.*.*`）、UA 只出七类粗标签、趋势是纯 CSS 柱子不引图表库；`view_count` 仍是前台真源，不用这张表回算） |
 | 登录日志与安全策略 | 后台看登录成败与爆破尝试，并可就地调锁定阈值 | 已实现（`AuthService.login()` 的四个出口各异步写一行 `login_logs`，写失败只记 error 不影响登录；保留 180 天，并入 §2.11 那条清理任务；入口是「日志管理 → 登录日志」，仅博主可达；**完整 IP 不出现在任何响应里**、UA 与访问日志共用同一套七类标签；锁定的次数与时长走 `site_settings` 两键，默认 5 次 / 15 分钟、合法 3–10 次与 5–60 分钟，读取夹紧、保存越界回 400，**改动只影响之后新开的计数窗口**，规则见 §2.12） |
 | 排序参数 | 列表排序口径唯一 | 已实现（`PostMapper.findAllBrief` 的 `<choose>` 里三个分支，取值集合就是 `latest` / `recommended` / `popular`，无 `hottest` 别名。`popular` = 侧栏热榜（`/articles/hot`）**独占**，按**加权热度分**纯热度倒序、不因置顶改位次——`(COALESCE(view_count,0) + COALESCE(like_count,0)×3 + COALESCE(comment_count,0)×5) ÷ POW(DATEDIFF(NOW(), COALESCE(published_at, created_at)) + 2, 0.6)`，权重与衰减指数内联在 SQL 常量里**不做配置化**；衰减基准优先 `published_at`、空值回退 `created_at`；**这里的 `NOW()` 是对的不是漏改**——两列都是 `TIMESTAMP`，MySQL 读写都按**会话时区**换算，`NOW()` 也在同一会话里取，天然与列值同基；会话由连接串显式钉成 +08:00（`db-design.md` §1，实际值由 `DataSourceTimeZoneTest` 断言），所以它不跟着数据库主机漂。写成 `CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00')` 那种「显式基准」反而破坏对称：会话一旦不是 +08，列值跟着漂而写死的基准不漂，衰减天数就凭空多/少一天；`GREATEST(…, 2)` 的钳位不可省——提前手工发布的存量行带着未来时刻，负底数会让 `POW` 抛 1690 打断整条查询。热度公式抽为 `<sql id="heatScore">`，被 `popular` 与 `recommended` 两个分支 include，**全仓只有一份**，不要另拆一条 SQL。`latest` = **后端缺省**：`is_top DESC, top_order DESC, published_at DESC, id DESC`——置顶优先，同为置顶的按权重从大到小，再按发布时间倒序（`published_at` 为 NULL 的存量行沉底）；搜索页与作者主页不传 sort 走的就是它，**缺省值不得改动**。`recommended` = 首页「推荐」tab：`is_top DESC, top_order DESC, 热度分 DESC, id DESC`——置顶是编辑推荐、不与热度分竞争位次，非置顶部分按热度倒序。前端 URL 约定：**无 `sort` 参数即「推荐」**（`HomeView` 显式传 `recommended`，不占用后端缺省语义），`?sort=latest` 才是「最新」。`popular` 由 `ArticleService.getHotArticles` 单页取回、不翻页，故不补 id 尾键；另两个分支末位的 `p.id DESC` 是全序尾键、不可省——冷文互动全为 0 时分数必然并列，缺它 `PageHelper` 的 `LIMIT/OFFSET` 会在并列行之间重复或漏取，滚动加载就表现为「同一篇出现两次」。前端列表参数类型只含 `latest` / `recommended`，**不含 `popular`**，不得把它扩给列表 tab。非法或缺省取值静默按 `latest` 处理，属既有兜底行为；`@Schema` 描述已写清三个合法值与该回落） |
-| 验证码与注册的防刷 | 发码频率上限、失败次数锁定 | 已实现。**发码频率上限**：`VerificationCodeService` 在生成验证码**之前**先查两道频控，注册、改邮箱、重置口令三个入口都生效——`auth:code-limit:{purpose}:{email}`（TTL 60s，同邮箱同用途 60 秒内只发一次）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00，每日上限 10 次），`purpose` 取 `registration` / `email-change` / `password-reset`；另有两层兜底日额度：`auth:code-ip-daily:{客户端地址}`（每来源地址每日 30 次）与 `auth:code-global-daily`（全站每日 500 次），堵「持邮箱列表绕开邮箱维度」的邮件轰炸中继。所有含 `{email}` 的键一律以 trim + 转小写后的归一化邮箱分键（库表是 ci 排序规则，键不归一，大小写变体就各领一套额度、两层锁定可被绕开）。超限抛业务异常（「发送过于频繁，请稍后再试」或「今日发送次数已达上限，请明日再试」）→ 400，且被限流时不消耗验证码与邮件。**发码防枚举**：找回密码的发码对未注册邮箱**静默跳过**（响应一律成功、不投递）；重置口令对未注册邮箱报「验证码错误或已过期」，不区分「码错」与「邮箱未注册」；注册链路的「该邮箱已被注册」是表单必要反馈，保留。**校验防穷举**：`auth:code-try:{purpose}:{email}` 按用途分键计数，首错设 TTL 5min（与码同寿），错满 5 次连带删掉码值键并改口提示「验证码错误次数过多，请重新获取」；校验成功即清计数；**没发过码或码已过期时不计失败**，免得未发码的邮箱被预先扣光额度。**登录防爆破**：`auth:login-fail:{email}:{客户端地址}` 双维度 `INCR`，默认满 5 次锁定 15 分钟（这两个值后台可调，键位、区间与生效时机见 §2.12），锁定期间不再校验口令也不给「邮箱存在与否」的差异反馈；口令错仍回 401（`BadCredentialsException` 的全局处理不动），只有锁定这条提示回 400；登录成功清键。**这四次结局各写一行 `login_logs`（§2.12）**。来源地址与阅读去重共用 `IpUtils.clientIp()`，不是硬保证（`X-Forwarded-For` 客户端可控）。**注册入参门槛**：`RegisterRequest` 声明口令 8-72 位（72 是 BCrypt 截断边界）、用户名 2-30 位且只允许中文/字母/数字/下划线/中划线、邮箱 ≤255（对齐列宽），中文提示由 `MethodArgumentNotValidException` 处理器原样带回 400。键位汇总见 `db-design.md` §5.4 |
+| 验证码与注册的防刷 | 发码频率上限、失败次数锁定 | 已实现。**发码频率上限**：`VerificationCodeService` 在生成验证码**之前**先查两道频控，注册、改邮箱、重置口令三个入口都生效——`auth:code-limit:{purpose}:{email}`（TTL 60s，同邮箱同用途 60 秒内只发一次）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00，每日上限 10 次），`purpose` 取 `registration` / `email-change` / `password-reset`；另有两层兜底日额度：`auth:code-ip-daily:{客户端地址}`（每来源地址每日 30 次）与 `auth:code-global-daily`（全站每日 500 次），堵「持邮箱列表绕开邮箱维度」的邮件轰炸中继。所有含 `{email}` 的键一律以 trim + 转小写后的归一化邮箱分键（库表是 ci 排序规则，键不归一，大小写变体就各领一套额度、两层锁定可被绕开）。超限抛业务异常（「发送过于频繁，请稍后再试」或「今日发送次数已达上限，请明日再试」）→ 400，且被限流时不消耗验证码与邮件。**发码防枚举**：找回密码的发码对未注册邮箱**静默跳过**（响应一律成功、不投递）；重置口令对未注册邮箱报「验证码错误或已过期」，不区分「码错」与「邮箱未注册」；注册链路的「该邮箱已被注册」是表单必要反馈，保留。**校验防穷举**：`auth:code-try:{purpose}:{email}` 按用途分键计数，首错设 TTL 5min（与码同寿），错满 5 次连带删掉码值键并改口提示「验证码错误次数过多，请重新获取」；校验成功即清计数；**没发过码或码已过期时不计失败**，免得未发码的邮箱被预先扣光额度。**登录防爆破**：两层计数——来源地址层 `auth:login-fail:{email}:{客户端地址}` 与**不带地址的邮箱层** `auth:login-fail-global:{email}`（阈值取地址层的 5 倍但不低于 20 次；只按地址分键时，轮换来源地址就能对同一个邮箱无限试口令，邮箱层堵的正是这条绕法，而 20 这个下限是为了不让「管理员把阈值调到 3」变成 15 次这种过紧的全局额度，把共享出口地址下的正常用户累加锁死），默认满 5 次锁定 15 分钟（这两个值后台可调，键位、区间与生效时机见 §2.12），锁定期间不再校验口令也不给「邮箱存在与否」的差异反馈；口令错仍回 401（`BadCredentialsException` 的全局处理不动），只有锁定这条提示回 400；登录成功清键。**这四次结局各写一行 `login_logs`（§2.12）**。来源地址与阅读去重共用 `IpUtils.clientIp()`，不是硬保证（`X-Forwarded-For` 客户端可控）。**注册入参门槛**：`RegisterRequest` 声明口令 8-72 位（72 是 BCrypt 截断边界）、用户名 2-30 位且只允许中文/字母/数字/下划线/中划线、邮箱 ≤255（对齐列宽），中文提示由 `MethodArgumentNotValidException` 处理器原样带回 400。键位汇总见 `db-design.md` §5.4 |
 | SEO 元数据 | 详情页 title/description/keywords 由服务端按回落链**合成**（规则见 §2.10） | 已实现（合成不查库：`文章标题 - 站点名` / `posts.excerpt` / 标签名拼接，只有公开详情带这三列；前台 `src/utils/seo.ts` 在路由切换时复位并重写 meta。**没有手动 SEO 面**：`seo_meta` 表、创建与更新的三个可选入参、原文回显端点、编辑器的「SEO 设置」段、后台的 `seoConfigured` 列与待补全清单均不存在，不要重建（§2.10）。**局限**：SPA 无 SSR，只惠及会执行 JS 的爬虫，见 §2.10 末段与 §6） |
 | 爬虫直读产物 | `robots.txt` / `sitemap.xml` / `feed.xml` 由后端直出，不依赖浏览器执行 JS | 已实现（`SeoPublicController` 三个 GET 端点按精确路径匿名放行（§5.5），`SeoPublicService` 手拼 XML 并转义，**不引模板引擎也不引 RSS 库**。sitemap = 首页 + 全部 `published` 文章详情，`lastmod` 取 `posts.updated_at` 的 ISO 8601 带时区偏移（时刻为空的行省掉该元素，不留空标签）；分类与标签是查询参数路由，按 sitemaps.org 惯例不申报。RSS 2.0 = 最新 20 篇按 `published_at` 倒序（存量无时刻行回落 `created_at`，与 §3.2 热度衰减同一条口径），`description` 用 CDATA 包裹服务端派生的摘要，channel 描述取 `site_settings.about_lead`（同一句话不在第三处重抄）。绝对地址由 `site_settings.site_url` 拼，未配置按当次请求 Host 兜底。**这三份产物落在 `context-path=/api/v1` 之下，域名根的可达性靠反向代理精确映射，写法见 README「SEO 产物与反向代理」**） |
-| 前台辅助界面 | 关于页（文案后台可配，见下）、发布成功页、深浅色主题切换（本地偏好）、首页统计卡（文章总数/分类数/最近更新）、热门列表「换一换」 | 已实现（关于页文案已后端化：`site_settings` 的 `about_*` 四键 + 公开读取 `GET /site/about` + 后台编辑 `PUT /admin/about-content`，未配置项回落内置默认文案） |
+| 前台辅助界面 | 关于页（文案后台可配，见下）、发布成功页、深浅色主题切换（本地偏好）、首页统计卡（文章总数/分类数/最近更新）、热门列表「换一换」 | 已实现（关于页文案已后端化：`site_settings` 的 `about_*` 四键 + 公开读取 `GET /site/about` + 后台编辑 `PUT /admin/about-content`，未配置项回落内置默认文案。另有公开 `GET /site/settings` 一次下发 `siteName` / `icpNumber` / `commentMaxLength` / `commentIntervalSeconds` / `registrationEnabled` 五项——标题后缀、页脚落款、评论框限长与间隔、注册入口都以它为准，**同一份数字不在前端抄第二遍**；两键的读写与越界口径见 §2.6） |
 | 关注作者 | 登录读者对文章作者的单向表态，可取消，同一人对同一作者只有一条关系 | 已实现（实体见 §2.8，流程见 §4.7；**只出计数、按钮状态与个人主页列表，不驱动分发与通知**，边界见 §6） |
-| 关注 / 粉丝列表 | 个人主页内展示「我关注的」「关注我的」两个列表，仅本人可见，列表内可直接取关 | 已实现（`GET /user/following`、`GET /user/followers`，属主只取登录态，仅限本人视角，见 §6） |
+| 关注 / 粉丝列表 | 展示「我关注的」「关注我的」两份名单：个人主页里是本人的（行内可直接取关），他人的作者主页里是 TA 的（公开可读，行内按钮按浏览者决定「关注 / 已关注 / 互相关注」） | 已实现（本人视角 `GET /user/following`、`GET /user/followers`，属主只取登录态；他人视角 `GET /users/{id}/following`、`/users/{id}/followers` 匿名可达，见 §3.2「作者主页」与 §5.5。两份名单共用 `UserBriefVO`：只出 id / 用户名 / 头像 / 简介 / 职业，**不含邮箱、角色、状态**。取关只有本人这一侧有入口。语义见 §4.7） |
 | 我点赞的文章 | 个人主页内展示本人点赞过的已发布文章，按点赞时刻倒序 | 已实现（`GET /user/liked-posts`，仅本人视角，见 §6） |
 
 ### 3.3 P2 — 明确排在后面
@@ -338,7 +347,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 3. 已登录点击 → 按当前状态选择「关注」或「取消关注」，两者都必须**幂等**（重复提交不产生第二条记录、不报错，返回当前真实状态）。前端按钮状态与关注数以服务端返回值为准，**不做乐观更新**（与 §4.5 同构）。
 4. 关注数按 `follows` 实际条数即时统计，不建常驻列、不做 `+1 / -1` 盲增。
 5. `follower_id` 一律服务端从安全上下文取，忽略客户端传入；自关注拒绝（400）、目标用户不存在拒绝（404）。
-6. 读路径有两处：文章详情响应的作者块（`followed` / `followers`），**不新增 `/articles/` 下的 GET 子路径**（避开 §5.5 的通配放行陷阱）；以及个人主页的「我关注的 / 关注我的」列表（`GET /user/following`、`GET /user/followers`，分页入参 `page` / `pageSize`，属主只取登录态）。写路径是 `POST|DELETE /users/{id}/follow`，由过滤链「其余一律要求登录」兜住。
+6. 读路径有四处：文章详情响应的作者块（`followed` / `followers`），**不新增 `/articles/` 下的 GET 子路径**（避开 §5.5 的通配放行陷阱）；作者主页的 `GET /users/{id}/profile`（含关注数与浏览者关注态）；作者主页的两栏名单 `GET /users/{id}/following`、`/users/{id}/followers`，**匿名可读**，行内按浏览者标注关注状态（未登录为 `null`，据此区分「没登录」与「登录了但没关注」）；本人视角的 `GET /user/following`、`/user/followers`、`/user/liked-posts`（分页入参 `page` / `pageSize`，属主只取登录态，个人主页与作者主页共用同一套 `UserBriefVO`）。写路径是 `POST|DELETE /users/{id}/follow`，由过滤链「其余一律要求登录」兜住。
 7. **关注不产生通知、不产生 feed、不改变任何列表排序**——它只落到计数、按钮状态与个人主页列表。这条是本能力的全部范围，超出即越界（见 §6）。
 
 ---
@@ -357,7 +366,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 | 文档 | SpringDoc OpenAPI 2.8.5（Swagger UI） |
 | 前端 | Vue 3.5 + TypeScript 6 + Vite 8；Pinia 3；**Vue Router 5** |
 | UI 与编辑器 | Element Plus 2.13（及其官方图标包 `@element-plus/icons-vue`，仅限界面小图标，见 ui-design §4.6）；写作内核 Vditor 4，阅读渲染用 md-editor-v3 的预览组件（**两套并存，各管读写，不要统一**） |
-| 其他 | axios、dayjs、sass、自托管字体 `@fontsource/noto-sans-sc` 与 `@fontsource/jetbrains-mono`；后端另有既有依赖 hutool-all 5.8.35（仅用于验证码随机数）；Node `^20.19.0 \|\| >=22.12.0` |
+| 其他 | 前端运行时另有：自托管字体 `@fontsource/noto-sans-sc` 与 `@fontsource/jetbrains-mono`、axios、dayjs、**markdown-it**（`utils/markdownBlocks.ts` 用它把正文切成块以定位插图与目录，不做第二套渲染）、**dompurify**（`utils/sanitize.ts`，进 DOM 前洗一遍）、**lodash-es** 的 `debounce`（三处搜索输入框共用）、**qrcode-generator**（分享二维码本地编码，见 §3.2 与 ui-design.md §3.2，**这是被禁外呼顶掉的那一环**）、nprogress（导航进度）。构建期依赖 `unplugin-vue-components` + `ElementPlusResolver` 承载 Element Plus 与自绘图标的按需注册（组件注册面因此不散写 import）；`sass` 在源码中零 import 但 27 处 `<style lang="scss">` 需要它存在。后端另有既有依赖 hutool-all 5.8.35，**两处用途**：`IdUtil.getSnowflakeNextId()` 生成 `users.id` / `posts.id`（`db-design.md` §1.1.1）与 `RandomUtil` 生成验证码；Node `^20.19.0 \|\| >=22.12.0` |
 | 前端测试 | Vitest 5 + `@vue/test-utils` 2 + happy-dom 20，三枚都是 `devDependencies`（§5.7 第 4 条例外）；`npm run test` 跑 `src/**/__tests__/*.spec.ts`，happy-dom 环境、`TZ=UTC`。测试文件不进 `vue-tsc --build` 也不进 `vite build` 产物（`tsconfig.app.json` 的 exclude 已覆盖该目录），也不发真实请求 |
 
 ### 5.2 目录与分层规范
@@ -402,7 +411,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 |---|---|
 | 会话 | 无状态，关闭 CSRF；不使用服务端 session |
 | token | HMAC-SHA 系；算法由 JJWT 按密钥字节长度推导（JJWT 0.12.6 + JDK 21 下：47 字节 → HS256，63 字节 → HS384，64 字节 → HS512），**本文不写死 HS256**。subject 为**邮箱**，有效期 7 天；**无刷新令牌、无轮换、无逐枚 jti 黑名单**（账号禁用靠每请求回库重载实现即时失效；**口令与会话的三处写入各推一枚按账号的失效水位键 `auth:token-epoch:{email}`**——找回密码 `POST /auth/password/reset`（未登录发起，凭一次性验证码）、修改口令 `PUT /user/password`（需登录，先验当前口令；邮箱没变，旧 token 仍验得过签名，只有水位能作废它）与登出 `POST /auth/logout`，签发时刻早于水位的 token 一律按未登录处理，见 §6「例外」与 `db-design.md` §5.4）。本地配置密钥为 63 字节，当前实际签发算法是 HS384 |
-| 过滤链顺序 | 顺序即规则，自上而下：`/auth/**` 与 `/error` 放行 → `GET /articles/drafts`、`GET /articles/mine` 要求登录（含私有数据的 GET 子路径都必须排在通配之前） → `GET /articles/**`、`/categories/**`、`/tags/**`、`/site/**` 放行（`/site/**` 是关于页文案的公开读取） → `/robots.txt`、`/sitemap.xml`、`/feed.xml` 三条**按精确路径**放行（爬虫直读，见 §3.2 与 README 的反向代理一节；写成 `/*.xml` 这种宽模式会把别处也漏出去） → 仅 `/actuator/health` 放行、接口文档放行只在 dev（`springdoc.api-docs.enabled` 为真时才装配这三条规则，其余 actuator 端点不放行） → `/admin/**` 要求 `ADMIN` → **其余一律要求登录**（含其他 actuator 端点）。管理端的分类读取 `GET /admin/categories` 落在 `/admin/**` 这条上，**不被上面 `/categories/**` 的通配放行覆盖**（该模式只匹配以 `/categories` 开头的路径），与 `/admin/tags` 同写法再叠一层方法级角色注解 |
+| 过滤链顺序 | 顺序即规则，自上而下（与 `SecurityConfig.filterChain` 的装配顺序一致， matcher 是首命中即用，改顺序就是改权限）：`/auth/**` 与 `/error` 放行 → `/robots.txt`、`/sitemap.xml`、`/feed.xml` 三条**按精确路径**放行（爬虫直读，查询只取已发布；写成 `/*.xml` 这种宽模式会把别处也漏出去，见 §3.2 与 README 的反向代理一节） → `GET /articles/drafts`、`GET /articles/mine` 要求登录（含私有数据的 GET 子路径都必须排在通配之前，落到通配就等于公开可读） → `GET /articles/**`、`/categories/**`、`/tags/**` 放行 → `GET /site/**` 放行（关于页文案与站点信息的公开读取） → **`GET /users/*/profile`、`/users/*/following`、`/users/*/followers`、`/users/*/liked-posts` 四条放行**（作者主页是公开视图，§3.2；这里刻意写单段 `*` 而不是 `/users/**`，只逐条放开这几个 GET，`/users/**` 其余路径照旧落到兜底） → 接口文档三条放行**只在 dev**（`springdoc.api-docs.enabled` 为真时才装配） → 仅 `/actuator/health` 放行 → `/admin/**` 要求 `ADMIN` → **其余一律要求登录**（含其他 actuator 端点、`POST\|DELETE /users/{id}/follow`、以及 `/user/**` 那一组本人视角读端点）。管理端的分类读取 `GET /admin/categories` 落在 `/admin/**` 这条上，**不被上面 `/categories/**` 的通配放行覆盖**（该模式只匹配以 `/categories` 开头的路径），与 `/admin/tags` 同写法再叠一层方法级角色注解。兜底之前还有一条异常口径：未认证走 401（自定义 entryPoint，链默认 `Http403ForbiddenEntryPoint` 会把未登录也回成 403，前端就分不清「会话失效」与「权限不足」），已认证但越权走 403 |
 | 关键陷阱 | 「`GET /articles/**` 通配放行」意味着**任何新增的 `/articles/` 下 GET 子路径会自动变成公开接口**。含私有数据的 GET 端点必须显式排在通配之前（现有先例：`/articles/drafts`、`/articles/mine`，照它们做）。放行与否只看路径不够，属主与角色判定仍要在服务层谓词里做——路径规则只决定谁够得到这条路由，够到之后能不能读这一篇另有一道 `isViewable` 判定（§4.3 第 2 条） |
 | 写权限 | 文章的创建/更新/删除仅博主（方法级角色注解）。**普通登录读者只能评论、点赞、关注作者、改自己的资料**，不能发文——这是真实的权限模型，不要「顺手」放开。草稿的删除/清空（`DraftController`）无角色注解，属主谓词保证只能删自己的草稿/定时文章；不得据此放开其他写接口 |
 | 登录留痕与锁定的可调性 | 登录的四种结局各异步写一行 `login_logs`（§2.12），写失败只记 error、**不改登录接口的响应与状态码**；禁用账号那条只留痕，异常原样抛出，401 与提示语仍由全局处理器给。锁定的次数与时长不是编译期常量：`PUT /admin/login-policy` 写 `site_settings` 两键（仅 `ADMIN`，越界 400），登录链路每次读一次并向下传 |
@@ -418,7 +427,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 |---|---|
 | MinIO | 所有上传图片（头像、正文插图、封面）。对象键为 `{用途}/{yyyyMM}/{随机名+原扩展名}`，按用途与上传年月分前缀，历史数据仍是桶根平铺、不回刷；细则见 `db-design.md` §5.5。**上传返回的是拼接了域名的完整 URL 并直接落库**——换存储域名需要回刷库，这是已知代价，不要改成前端拼 |
 | MinIO 校验 | 最终以**文件魔数**裁决：`FileService` 读前 16 字节比对 jpeg/png/gif/webp 四种文件头，命中才入库，**扩展名由服务端按魔数生成**，不再采信客户端申报的内容类型与 `originalFilename` 的扩展名片段；申报的内容类型只作 Controller 层的第一道快速过滤。单文件上限 10MB；另有按用户的上传日额度 `upload:daily:{userId}`（100 次/日，见本表 Redis 行）。对象回收已补上：换下的头像与随文章删除的封面/正文配图会一并从桶里删掉，判据与代价见 §3.3「图片对象回收」；不做全桶扫描与孤儿对象巡检（§6） |
-| Redis | 只有三处：① 认证面（码值键 5 分钟 TTL、一次性、校验通过即销毁；另有发码频控键、校验失败计数键 `auth:code-try:{purpose}:{email}`、登录失败计数键 `auth:login-fail:{email}:{ip}`、token 失效水位键 `auth:token-epoch:{email}`，口径见 §3.2，键位汇总见 `db-design.md` §5.4）；② 阅读**去重**（`article:view_dedup:{postId}` 小时窗口集合，`SADD`+判 `TTL`+`EXPIRE` 由一条 Lua 脚本原子完成。库里那列 `view_count` 是计数的唯一存储，Redis 侧没有第二个计数器）；③ 上传日额度（`upload:daily:{userId}`，每用户 100 次/日）。**未启用注解式缓存**，没有 `@Cacheable`、没有 `CacheManager`。不要为省查询随手加缓存层 |
+| Redis | 只有三处：① 认证面（码值键 5 分钟 TTL、一次性、校验通过即销毁；另有发码频控键、校验失败计数键 `auth:code-try:{purpose}:{email}`、登录失败计数键 `auth:login-fail:{email}:{ip}` 与不带地址的邮箱层 `auth:login-fail-global:{email}`、token 失效水位键 `auth:token-epoch:{email}`，口径见 §3.2，键位汇总见 `db-design.md` §5.4）；② 阅读**去重**（`article:view_dedup:{postId}` 小时窗口集合，`SADD`+判 `TTL`+`EXPIRE` 由一条 Lua 脚本原子完成。库里那列 `view_count` 是计数的唯一存储，Redis 侧没有第二个计数器）；③ 上传日额度（`upload:daily:{userId}`，每用户 100 次/日）。**未启用注解式缓存**，没有 `@Cacheable`、没有 `CacheManager`。不要为省查询随手加缓存层 |
 | 阅读量口径 | **只有 `published` 文章的详情访问才计数，且同一访问者 1 小时窗口内只 +1**；未发布内容（草稿 / 定时 / 已下线）的预览与 bot（含空 UA）一律不计。键位、访问者标识与 TTL 设置时机见 `db-design.md` §5.2。计数**只有库列这一处存储**，Redis 只负责「这次访问算不算」的判定，不另记计数。去重是尽力而为的防刷：`X-Forwarded-For` 客户端可控，换申报值即可绕开，不要当硬保证。地址在 Set 里只作成员存在 1 小时，Set 本身不是存储；但**同一次判定会异步落一行 `visit_logs`**，那里留 180 天（§2.11） |
 | SMTP | 仅用于注册验证码。无条件装配、无开关、无降级——**邮件配置缺失会导致启动或发码失败**，涉及发码链路的改动要意识到这一点 |
 | 访问日志 | **写库**（规则见 §2.11）：只在 `published` 文章详情命中阅读量判定时异步落一行，bot 与空 UA 不写，写失败只记 error 不影响详情；原始 IP 入库、只在读取侧脱敏，超 180 天的行由保留期任务删除。库侧口径见 `db-design.md` §2.9（写入、脱敏、聚合）与 §4.1/§4.4（`idx_created_at` 与其代价） |
@@ -436,7 +445,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 9. 禁止以「重构」为名改动已稳定模块（阅读量双写、历史包位、JWT subject、统一响应结构）。
 10. 禁止为 `Like` 引入多目标点赞抽象（`target_type` 一类）——当前只有文章可点赞。
 11. 禁止在文档/注释里写「已支持」而代码未支持（§2.7 的表位登记与 §3 的现状列即为防此类漂移而设）。
-12. 禁止为 `Follow` 引入互关 / 好友语义、更新通知，或把关注接进任何排序与分发——它只产出计数、按钮状态与个人主页列表（§4.7 第 7 条）。粉丝/关注列表页**仅限本人视角**（自己看自己的关注与粉丝），不做他人主页的粉丝浏览。
+12. 禁止为 `Follow` 引入互关 / 好友**语义**、更新通知，或把关注接进任何排序与分发——它只产出计数、按钮状态与两份名单（本人的个人主页、他人的作者主页，均公开可读；§3.2「作者主页」与 §4.7 第 6 条）。「互相关注」是两行单向记录在**视图层的并集判定**，只用来决定按钮文案（§4.7 第 6 条），库里没有互关列、也不因它派生任何新能力。名单行一律只出 `UserBriefVO` 五列，不得扩到邮箱 / 角色 / 状态。
 
 ---
 
@@ -451,7 +460,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 - 不做 token 刷新、逐枚 jti 黑名单。主动登出只有 `POST /auth/logout` 一种形式：把该账号的失效水位推到此刻，作废该账号全部在存 token（见下一条）。
 - **token 失效水位是上一条的例外，且仅此一种**：按账号写一枚 Redis 键 `auth:token-epoch:{email}`，找回密码 `POST /auth/password/reset`（未登录发起，凭一次性验证码）、修改口令 `PUT /user/password`（需登录，先验当前口令）与登出三处各推一次，签发时刻（JWT 的 `iat`）早于它的 token 一律按未登录处理 → 401。不建黑名单表、不加 jti 声明：重置链路本就是未登录发起的，请求头里没有攻击者那枚 token，按 jti 拉黑「当前 token」等于什么都没拉黑；而 subject 是邮箱，**改邮箱不需要这枚键**，旧 token 自然查不到用户（§3.1）。裁决若再变，先改本条再动代码。
 - 不做站内通知、私信。
-- **关注是上一条清单的例外，且仅此一种**：登录读者可对文章作者做单向、可撤销的一次性表态，产物是关注计数、按钮状态与个人主页内的关注/粉丝列表（仅限本人视角，见 §4.7 第 6 条与 §5.7 第 12 条）；个人主页同时提供「我点赞的文章」列表（同样仅本人视角）。**不做**互关 / 好友、不做他人可浏览的粉丝页、不做「我关注的人」feed、不做更新提醒、不改变任何列表排序。裁决若再变，先改本条再动代码。
+- **关注是上一条清单的例外，且仅此一种**：登录读者可对文章作者做单向、可撤销的一次性表态，产物是关注计数、按钮状态、本人个人主页里的关注/粉丝两份名单，以及**他人作者主页里公开可读的两份名单**（§3.2「作者主页」、§4.7 第 6 条）；个人主页同时提供「我点赞的文章」列表（仅本人视角），他人主页的「点赞」栏只列该作者 `published` 的文章。**不做**互关 / 好友语义（「互相关注」只是按钮文案，§5.7 第 12 条）、不做「我关注的人」feed、不做更新提醒、不改变任何列表排序。裁决若再变，先改本条再动代码。
 
 **内容形态**
 
@@ -483,7 +492,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 
 **当前明确的下一个待决问题**（需要用户裁决，不得自动实现）
 
-暂无。
+暂无。（唯一一处两派都能自圆其说、当前按现状定下来的地方记在 §2.2 与 §3.2：**禁用账号不从公开面上撤下**——`FollowMapper` 的两份名单与 `AuthorProfileService.getProfile` 都不按 `users.status` 过滤，禁用中的读者仍出现在他人的粉丝名单里、其作者主页仍可匿名打开，走的是「留痕派」，与 `login_logs` 不回写、`offlined_by/at` 不清空同一条气质。若哪天要转到「隐身派」，先来本节登记裁决，再动两条 SQL 的 WHERE 与一处 404 判定；没有裁决之前，不得以「修复漏洞」的名义顺手加过滤。）
 
 既往裁决的修订记录见附录 B，现行口径以正文对应小节为准。
 
@@ -536,3 +545,4 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 | 2026-10-04 | 时区口径判定侧、出站侧与库侧收口：评论最小间隔、日志保留期阈值、sitemap / RSS 的时区偏移都改锚北京墙钟；库侧**保留 `NOW()`**——时刻列是 `TIMESTAMP`，MySQL 读写都按会话时区换算，`NOW()` 与列值天然同基，于是改由连接串 `connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true` 把每条连接的会话显式钉成 +08:00（只写 `serverTimezone` 不改会话），实际会话值由 `DataSourceTimeZoneTest` 断言。曾把 SQL 两处 `NOW()` 换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+08:00')`，**同轮实测否决**：会话一旦不是 +08，列值随会话漂而写死的基准不漂，反而凭空差 8 小时 | §2.11、§3.2、§4.4、§5.4、§5.6 |
 | 2026-10-04 | 文档规范化：文件头增量段迁入本表、正文去沿革注记、状态机补下线两条迁移、bot 与 `offline` 口径补齐、技术债清单只留未还项；同步修订源码注释的小节引用与沿革表述 | 全文 |
 | 2026-10-04 | 自托管部署实机状态刷新：本机已有容器运行时，compose 栈实机走查四容器 healthy、域名根三产物与 `/api/v1` 反代可达；随实机验证入编的修复——redis 健康探针密码变量、prod 关闭 mail 健康指示器、验证码读取去 JSON 引号、mysql 服务端时区钉 `+08:00`、api 内存限 2 GiB、数据库备份脚本 `deploy/backup-db.sh`——由编排与挂载配置承担 | §3.3 |
+| 2026-10-05 | 一轮**以代码为准**的全量回写（文档落后于实现，代码侧未动）：作者主页四栏公开可读，§5.7 第 12 条与 §6 的「粉丝/关注仅限本人视角」禁令按现状改写，「禁用账号不从公开面上撤下」按代码现状定为**留痕派**记进 §2.2 与文末 §6（不是待决项，收紧需先登记裁决）；§5.5 过滤链补 `/users/*/profile`、`/following`、`/followers`、`/liked-posts` 四条 GET 放行并按代码装配顺序重排；找回密码与「记住我」的 token 落点补进 §3.1/§3.2；`comment_max_length` 与 `comment_interval_seconds` 补进 §2.6；登录防爆破补出不带地址的邮箱层键（两层任一到阈即锁、成功一起清）；`GET /site/settings` 五字段入账；§5.1 依赖清单补齐，并按代码纠正 hutool 的用途（`IdUtil` 生成雪花 ID 与 `RandomUtil` 生成验证码两处，不再只写后者） | §2.2、§2.6、§2.12、§3.1、§3.2、§4.7、§5.1、§5.5、§5.6、§5.7、§6 |
