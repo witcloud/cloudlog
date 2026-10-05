@@ -1458,6 +1458,12 @@ const handleRealSave = async (isDraft = false, isSilent = false) => {
   &::placeholder {
     color: var(--color-ink-4);
   }
+
+  /* 焦点态：这块书写面是无边框设计，补描边就会把画布切成一格，所以用「凹陷/反馈面」那一档
+     整行底色微差来表达（ui-design.md §5.2 登记的第四类替代）。不做过渡——焦点信号必须立即出现 */
+  &:focus-visible {
+    background-color: var(--color-paper-3);
+  }
 }
 
 /* 标题字数计数：贴近上限（70+）才出现的右下角小字，坐在分隔线上方 */

@@ -53,7 +53,6 @@
   --text-lg: 1.5625rem; /* 25 */
   --text-xl: 1.9531rem; /* 31 */
   --text-2xl: 2.4414rem; /* 39 */
-  --text-display: clamp(2.25rem, 3.5vw + 1rem, 3.25rem);
 
   /* ---- 间距 · 4pt 刻度 ---- */
   --space-3xs: 0.125rem;
