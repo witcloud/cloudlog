@@ -1,10 +1,11 @@
 # CloudLog 数据库设计文档（db-design.md）
 
 > **用途**：面向 AI Agent 的数据库规范。本文可直接指导 schema / migration 的生成，无需再回读代码。
-> **依据**：业务语义来自 [`business-model.md`](./business-model.md) **Part A**；字段、类型、索引、枚举取值的最高真源是 `docs/schema.sql`。本文与 `docs/schema.sql` 逐项对齐，**不引入任何 `docs/schema.sql` 中不存在的表或列**。
-> **范围**：博客业务明确需要的 **12 张表**（§2.0 清单为唯一口径）。目标态功能（点赞幂等对、定时发布调度器、邮箱修改）**都不需要新的表或列**——这是本文的一条硬约束。第 11 张 `follows` 不是为某个目标态功能预留的，它随 2026-10-01 用户裁决新增的关注能力一并建立（business-model.md §2.8、§4.7），裁决前它属于 §6 的「不得创建」清单。
+> **依据**：业务语义来自 [`business-model.md`](./business-model.md) §2–§4。
+> **分工（2026-10-05 起，硬约束）**：**类型、长度、可空性、默认值、ENUM 取值、索引的字段与定义——这些一律只在 `docs/schema.sql` 里存在一份，本文不抄。** 本文只写抄不走的东西：为什么这样设计、代价、状态机与写路径的口径、明确不建什么。凡是能在本文里重述一遍 DDL 的句子，都是下一轮漂移的源头，读到这种句子就删掉它、改成指向 `schema.sql`。反向禁令照旧：**不得出现 `schema.sql` 里不存在的表或列**。
+> **范围**：表的全集以 §2.0 那张清单为唯一口径（本文不背「共几张表」这种计数——加一张就得改一处，改漏一次它就变成假话）。已落地的点赞、关注、定时发布、找回密码、邮箱修改五件事**都没有新增表或列**，这是本文那条硬约束被验证过五次的事实；新增表与新增列仍是独立裁决事项。第 11 张 `follows` 不是为某个目标态功能预留的，它随 2026-10-01 用户裁决新增的关注能力一并建立（business-model.md §2.8、§4.7），裁决前它属于 §6 的「不得创建」清单。
 > **数据库**：MySQL 8，单实例单库，InnoDB，`utf8mb4`。
-> **核对基准**：2026-10-05，对 `docs/schema.sql` 与后端代码逐列、逐索引清点。
+> **核对基准**：2026-10-05。这一轮先按代码逐列清点、再改为「不抄 DDL」的结构：删掉了 §2 各表的类型/必填/默认值三栏与 §4.1 的字段/类型两栏（合计 109 行表格内容），留下的全是说明性文字。
 
 ---
 
@@ -16,8 +17,8 @@
 |---|---|
 | 默认主键 | `id INT NOT NULL AUTO_INCREMENT`，代理主键，无业务含义，永不复用。**`users` 与 `posts` 两张表不走这条规则**（见例外三），其余表照旧 |
 | 例外一 | `post_tags` 用 `(post_id, tag_id)` 联合主键，不另加 `id`（纯关联表，行本身无独立身份） |
-| 例外二 | `site_settings` 用 `setting_key VARCHAR(64)` 自然主键（KV 表，键即身份） |
-| 例外三 | `users.id` 与 `posts.id` 都是 `BIGINT` **且无 `AUTO_INCREMENT`**，由应用层雪花 ID 生成（规则见 §1.1.1）。引用它们的 11 个列同为 `BIGINT`：4 个 `post_id`（`post_tags`/`comments`/`likes`/`visit_logs`）与 7 个用户列（`posts.author_id`、`posts.offlined_by`、`comments.user_id`、`likes.user_id`、`follows.author_id`、`follows.follower_id`、`login_logs.user_id`）。**这些表自身的 `id`（如 `likes.id`、`follows.id`、`comments.id`）仍按默认规则自增** |
+| 例外二 | `site_settings` 用 `setting_key` 自然主键（KV 表，键即身份，没有「另发一个 id」的余地） |
+| 例外三 | `users.id` 与 `posts.id` 都是 `BIGINT` **且无 `AUTO_INCREMENT`**，由应用层雪花 ID 生成（规则见 §1.1.1）。凡是引用它们的列（`post_id`、`author_id`、`user_id`、`follower_id`、`offlined_by` 等）也同为 `BIGINT`。**哪些列属于这一类不在本文清点**——列的类型看 `schema.sql`，一眼可辨；本文只锁住规则：新增引用列不许用 `INT`。这些表自身的 `id`（如 `likes.id`、`follows.id`、`comments.id`）仍按默认规则自增 |
 | 不自增语义键 | 邮箱、用户名、slug 一律不作为主键。文章**没有 slug**，路由直接用它那串雪花 `id` |
 | 主键不更新 | `id` 一旦写入永不修改，不作为可更新列出现在任何语句中 |
 | `likes` 保留 `id` | `likes` 同时有代理主键 `id` 和唯一键 `uk_post_user`，属现状：**去重语义由唯一键承担，`id` 保持为稳定行标识，两者都不删** |
@@ -50,10 +51,10 @@
 | 规则 | 内容 |
 |---|---|
 | 类型 | 一律 `TIMESTAMP`，由 **DB 默认值维护**，应用层不显式赋值 `created_at` / `updated_at` |
-| `created_at` | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP`，除 `post_tags`、`site_settings` 外每表都有 |
-| `updated_at` | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`，**只有** `users`、`posts`、`site_settings`、`banned_words` 四张表有（见 §5.7 评论无 `updated_at` 的后果） |
-| `published_at` | 业务时间戳，仅 `posts` 有，`TIMESTAMP NULL DEFAULT NULL`，语义见 §5.3 |
-| 时刻列的现存清单 | 除 `created_at` / `updated_at` / `published_at` 三个通用名之外，库里另有两枚**事件时刻**列：`posts.offlined_at`（最近一次下线）与 `users.last_login_at`（上次登录成功）。两枚都是「谁在什么时候干了这件事」的留痕，走 DB 默认值与 `NULL`（从未发生），不是软删除标记 |
+| `created_at` | 行创建时刻，由 DB 默认值给。纯关联表与 KV 表不带（`post_tags`、`site_settings`）——它们没有「这一行诞生于何时」这个问题 |
+| `updated_at` | 只在「这一行被改过」本身有意义的表上存在（评论、点赞、日志改了就是改内容，不给 `updated_at`；见 §5.7 评论无 `updated_at` 的后果）。**哪几张表有，看 `schema.sql`，本文不点名** |
+| `published_at` | 业务时刻，不是审计列，只有 `posts` 有；语义见 §5.3 |
+| 事件时刻列 | 通用三名之外另有**事件留痕**列（`posts.offlined_at`、`users.last_login_at`）：记「谁在什么时候干了这件事」，`NULL` 表示从未发生。它们不是软删除标记，也不参与排序与筛选
 | 时区 | 服务端 `GMT+8`，不做 UTC 存储、不做应用层时区换算。时刻列都是 `TIMESTAMP`——MySQL 按**会话时区**换算存取，`NOW()` 与 `CURRENT_TIMESTAMP` 报的也是会话时区的墙钟，所以「服务端 GMT+8」这句话实际是靠会话时区成立的，而不是靠列类型。基由**连接**钉：`connectionTimeZone=%2B08:00` + `forceConnectionTimeZoneToSession=true` 让驱动在建连时发 `SET time_zone='+08:00'`（只写 `serverTimezone` 不够——它只告诉驱动怎么解释字节，不改会话，会话仍是主机的 `SYSTEM`）。钉住之后 `NOW()` / `CURRENT_TIMESTAMP` / `ON UPDATE` 与 Java 侧 `businessNow()` 写的北京墙钟同基，SQL 里继续用 `NOW()` 即可；**不要**换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')`——那样列值仍随会话换算、基准却被钉死，会话一旦不是 +08 反而凭空差 8 小时。实际会话值由 `DataSourceTimeZoneTest` 断言，不靠读配置推定。Java 侧一律 `businessNow()` / `ArticleService.BUSINESS_ZONE`，不写裸 `now()` 与 `ZoneId.systemDefault()` |
 | 不新增时间列 | 不引入 `deleted_at`、`approved_at`、`expires_at` 等。`offlined_at` 与 `last_login_at` 是已经落库的两枚事件留痕（见上一行），不是这条禁令的例外先例——要再加第三枚，先改本文 |
 
@@ -75,7 +76,7 @@
 
 ### 1.6 枚举与布尔
 
-- 封闭取值集合用 `ENUM`，共 5 处：`users.role`、`posts.status`、`comments.status`、`banned_words.action`、`login_logs.result`。ENUM 取值集合是对外契约的一部分，**增删取值必须先改本文与 `schema.sql`**，不得在 migration 里悄悄加值。
+- 封闭取值集合用 `ENUM`（哪几列用 `ENUM`、每列取值集合是什么，一律看 `schema.sql`，本文不抄清单，也不写「共几处」）。ENUM 的取值集合是对外契约的一部分，**增删取值必须先改 `schema.sql`、再回本文改对应的那句语义**（状态机见 §5.1），不得在 migration 里悄悄加值。
 - 布尔语义用 `TINYINT`，取值 `1/0`，不用 `BOOLEAN`/`BIT`。
 - 哨兵值优先于 `NULL` 表达「无父」：`comments.parent_id = 0` 表示根评论（不是 `NULL`）。而 `NULL` 只用于「确实不存在」：`category_id`、`published_at`、匿名评论的 `user_id`、`visit_logs.post_id`。
 
@@ -89,13 +90,13 @@
 ### 1.8 容量与字符集
 
 - 全表 `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`（中文 + emoji），**不显式指定 collation**，随 MySQL 8 库默认。
-- URL 列（`users.avatar`、`posts.cover`）与文本短列统一 `VARCHAR(255)`；名称 `VARCHAR(100)`；身份类一句话（`users.occupation`）`VARCHAR(30)`；正文 `LONGTEXT`；摘要/评论内容 `TEXT`。容量按 §2 逐列声明，不做「顺手放宽」。
+- URL 列（`users.avatar`、`posts.cover`）与文本短列统一 `VARCHAR(255)`；名称 `VARCHAR(100)`；身份类一句话（`users.occupation`）`VARCHAR(30)`；正文 `LONGTEXT`；摘要/评论内容 `TEXT`。**容量的唯一记录处是 `schema.sql`，本文只定档位语言与例外理由，不做「逐列抄一遍宽度」**——那一遍正是漂移高发区。放宽或收窄任何一列都是独立裁决，不在「顺手」的范围内。
 - `visit_logs.ip` 为 `VARCHAR(45)`，按 IPv6 文本最大长度取值，**不得缩短**。
 - `banned_words.word` 为 `VARCHAR(50)`：违禁词是短词条，50 字符远超实际词长；`comments.hit_word` 取同一宽度，因为它是命中词的值拷贝。**词库不再有总量上限**——它是一行一个词，容量由表承担而不是由某个 `VARCHAR(255)` 列承担；此前寄居 `site_settings.banned_words` 时「约 80 个双字词」的上限已随该键删除而消失（见 §2.10、§2.12）。
 
 ### 1.9 必填性的口径
 
-§2 的「必填」列严格照 `schema.sql` 的现值。**不要为「更严谨」而自行加 `NOT NULL`**（如 `users.status`、`posts.is_top`、各计数列在现库定义中确实可空但都带默认值）。收紧可空性是独立裁决事项，不在生成 schema 的自由发挥范围内。
+**可空性不在本文记录**，`schema.sql` 是唯一真源。规则只有一条：**不要为「更严谨」而自行加 `NOT NULL`**——现库里有一批「可空但带默认值」的列（开关、计数、布尔），那是有意的宽松，不是疏忽。收紧任何一列的可空性是独立裁决事项，不在生成 schema 的自由发挥范围内。
 
 ---
 
@@ -103,113 +104,113 @@
 
 ### 2.0 表清单
 
-| # | 表 | 用途 | 主键形态 | 有 `created_at` | 有 `updated_at` |
-|---|---|---|---|---|---|
-| 1 | `users` | 账号、角色、公开资料 | `id` 雪花（无自增） | 是 | 是 |
-| 2 | `categories` | 文章分类（扁平一层） | `id` 自增 | 是 | 否 |
-| 3 | `tags` | 文章标签 | `id` 自增 | 是 | 否 |
-| 4 | `posts` | 文章主体 + 状态 + 计数 | `id` 雪花（无自增） | 是 | 是 |
-| 5 | `post_tags` | 文章↔标签关联 | `(post_id, tag_id)` | 否 | 否 |
-| 6 | `comments` | 评论与一层回复 | `id` 自增 | 是 | 否 |
-| 7 | `likes` | 用户对文章的点赞 | `id` 自增 | 是 | 否 |
-| 9 | `visit_logs` | 文章访问日志（追加表） | `id` 自增 | 是 | 否 |
-| 10 | `site_settings` | 站点级 KV 配置 | `setting_key` | 否 | 是 |
-| 11 | `follows` | 读者↔作者的关注关系 | `id` 自增 | 是 | 否 |
-| 12 | `banned_words` | 评论违禁词库（一词一行） | `id` 自增 | 是 | 是 |
-| 13 | `login_logs` | 登录尝试日志（追加表） | `id` 自增 | 是 | 否 |
+| # | 表 | 这一张存在是为了什么（主键形态、时间戳有无一律看 `schema.sql` 与 §1.1/§1.3） |
+|---|---|---|
+| 1 | `users` | 账号、角色、公开资料 |
+| 2 | `categories` | 文章分类（扁平一层） |
+| 3 | `tags` | 文章标签 |
+| 4 | `posts` | 文章主体 + 状态 + 计数 |
+| 5 | `post_tags` | 文章↔标签关联 |
+| 6 | `comments` | 评论与一层回复 |
+| 7 | `likes` | 用户对文章的点赞 |
+| 9 | `visit_logs` | 文章访问日志（追加表） |
+| 10 | `site_settings` | 站点级 KV 配置 |
+| 11 | `follows` | 读者↔作者的关注关系 |
+| 12 | `banned_words` | 评论违禁词库（一词一行） |
+| 13 | `login_logs` | 登录尝试日志（追加表） |
 
 `visit_logs` 于 2026-10-03 建成完整读写链路（§2.9，业务侧口径见 business-model.md §2.11），business-model.md §2.7 那份预留表位清单因此清空。**序号 8 是空位**：`seo_meta` 已于 2026-10-03 下线删除，详情页的 SEO 三元组改由服务端按回落链合成（business-model.md §2.10）。序号不回收——§2.x 这套编号被三份文档交叉引用，挪号等于把所有引用一起改一遍，得不偿失。`likes` 链路已启用，其读写与删除规则见 §3.1。`follows` 随关注能力一并启用，读写规则同见 §3.1。`banned_words` 是**内容数据不是站点配置**：它在「评论管理」内维护、逐行增删启停，因此不入 `site_settings`（理由见 §2.12 与 §6）。
 
-以下所有表均带 `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4` 与中文表注释；§2 各表只列字段，不再重复。
+以下每张表两列：**字段名 + 说明**。类型、长度、可空性、默认值不在本文出现——它们在 `schema.sql` 里只有一份，本文写第二份就是给自己埋漂移。全表统一 `ENGINE=InnoDB`、`utf8mb4`、带中文表注释，逐表不再重复。
 
 ### 2.1 `users` — 系统用户表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `BIGINT` | 是 | — | 主键；**应用层雪花 ID，无 `AUTO_INCREMENT`**（§1.1.1） |
-| `email` | `VARCHAR(255)` `UNIQUE` | 是 | — | 登录名；**同时是 JWT subject**（见 §5.4）；唯一 |
-| `password` | `VARCHAR(255)` | 是 | — | BCrypt 密文，永不返回给任何接口 |
-| `username` | `VARCHAR(100)` `UNIQUE` | 是 | — | 展示昵称，唯一 |
-| `avatar` | `VARCHAR(255)` | 否 | `NULL` | MinIO **绝对 URL**（见 §5.5） |
-| `bio` | `VARCHAR(255)` | 否 | `NULL` | 个人简介 |
-| `occupation` | `VARCHAR(30)` | 否 | `NULL` | 职业一句话，用户自行修改（与 `bio` 同属资料更新入参）；列宽 30 是「一行身份说明」的量级，不是简介那种整句 |
-| `role` | `ENUM('admin','user')` | 是 | `'user'` | `admin`=博主，`user`=普通用户；角色变更即时生效（§5.1） |
-| `status` | `TINYINT` | 否 | `1` | `1` 正常 / `0` 禁用；禁用即鉴权链抛账号禁用异常 → 401 |
-| `last_login_at` | `TIMESTAMP NULL` | 否 | `NULL` | 上次**登录成功**的时刻，`NULL` = 从未登录。由 `UserMapper.updateLastLogin` 一条独立 UPDATE 写，位置排在认证成功、签发 token 之前——失败、被锁定、禁用、重置口令都不更新它（§2.13 的 `success` 那一行同一时刻） |
-| `last_login_ip` | `VARCHAR(45)` | 否 | `NULL` | 上次登录成功的来源地址，**存原始值**；实体上带 `@JsonIgnore`，因此不经 `/user/profile` 出接口，只在后台用户列表下发脱敏串（`IpMaskUtils.mask()`，与 §2.9 同一对公共件） |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 注册时间 |
-| `updated_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 资料更新时间 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键；**应用层雪花 ID，无 `AUTO_INCREMENT`**（§1.1.1） |
+| `email` | 登录名；**同时是 JWT subject**（见 §5.4）；唯一 |
+| `password` | BCrypt 密文，永不返回给任何接口 |
+| `username` | 展示昵称，唯一 |
+| `avatar` | MinIO **绝对 URL**（见 §5.5） |
+| `bio` | 个人简介 |
+| `occupation` | 职业一句话，用户自行修改（与 `bio` 同属资料更新入参）；列宽 30 是「一行身份说明」的量级，不是简介那种整句 |
+| `role` | `admin`=博主，`user`=普通用户；角色变更即时生效（§5.1） |
+| `status` | `1` 正常 / `0` 禁用；禁用即鉴权链抛账号禁用异常 → 401 |
+| `last_login_at` | 上次**登录成功**的时刻，`NULL` = 从未登录。由 `UserMapper.updateLastLogin` 一条独立 UPDATE 写，位置排在认证成功、签发 token 之前——失败、被锁定、禁用、重置口令都不更新它（§2.13 的 `success` 那一行同一时刻） |
+| `last_login_ip` | 上次登录成功的来源地址，**存原始值**；实体上带 `@JsonIgnore`，因此不经 `/user/profile` 出接口，只在后台用户列表下发脱敏串（`IpMaskUtils.mask()`，与 §2.9 同一对公共件） |
+| `created_at` | 注册时间 |
+| `updated_at` | 资料更新时间 |
 
 ### 2.2 `categories` — 文章分类表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `name` | `VARCHAR(100)` `UNIQUE` | 是 | — | 分类名，唯一；**无父子关系，扁平一层** |
-| `description` | `VARCHAR(255)` | 否 | `NULL` | 分类描述 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 创建时间 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `name` | 分类名，唯一；**无父子关系，扁平一层** |
+| `description` | 分类描述 |
+| `created_at` | 创建时间 |
 
 ### 2.3 `tags` — 文章标签表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `name` | `VARCHAR(100)` `UNIQUE` | 是 | — | 标签名，唯一 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 创建时间；标签合并（source→target）在应用层改写 `post_tags` 后删本行 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `name` | 标签名，唯一 |
+| `created_at` | 创建时间；标签合并（source→target）在应用层改写 `post_tags` 后删本行 |
 
 ### 2.4 `posts` — 文章表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `BIGINT` | 是 | — | 主键；**应用层雪花 ID，无 `AUTO_INCREMENT`**（§1.1.1）；前台路由直接使用它，无 slug |
-| `title` | `VARCHAR(255)` | 是 | — | 标题 |
-| `content` | `LONGTEXT` | 是 | — | **Markdown 源文**，不在库内渲染 |
-| `excerpt` | `TEXT` | 否 | `NULL` | 摘要；**服务端由 `content` 派生**，作者侧不填（§1.7、business-model.md §4.2 第 6 条） |
-| `cover` | `VARCHAR(255)` | 否 | `NULL` | 封面图 MinIO **绝对 URL** |
-| `author_id` | `BIGINT` | 是 | — | 逻辑引用 `users.id`（用户雪花 ID）；实际只有博主（`admin`）发文 |
-| `category_id` | `INT` | 否 | `NULL` | 逻辑引用 `categories.id`；定时/立即发布要求已选分类，但 DB 不设非空 |
-| `status` | `ENUM('draft','published','scheduled','offline')` | 是 | `'draft'` | 状态机见 §5.1；`offline`=已下线，收回对外可见性但保留 `published_at`，仅作者与博主可见 |
-| `is_top` | `TINYINT` | 否 | `0` | `1` 置顶 / `0` 普通；参与列表默认排序 |
-| `top_order` | `INT` | 是 | `0` | 置顶权重，**越大越靠前，且仅 `is_top = 1` 时参与排序**（`latest` 与 `recommended` 两个分支按 `is_top DESC, top_order DESC` 打头，口径见 business-model.md §3.2「排序参数」）；`NOT NULL` 带默认值，因为排序谓词要的是可比而不是可空 |
-| `view_count` | `INT` | 否 | `0` | 冗余计数，规则见 §5.2 |
-| `like_count` | `INT` | 否 | `0` | 冗余计数，规则见 §5.2 |
-| `comment_count` | `INT` | 否 | `0` | 冗余计数，仅 `approved` 计入，规则见 §5.2 |
-| `published_at` | `TIMESTAMP NULL` | 否 | `NULL` | **首次对外可见的时刻**，语义见 §5.3 |
-| `offlined_by` | `BIGINT` | 否 | `NULL` | 最近一次执行「下线」的操作者用户 ID（雪花值，§1.1 例外三）。**重新上线不清空**：下架留痕的意义就在于执行者抹不掉它，所以这一列不随状态回摆而消失 |
-| `offlined_at` | `TIMESTAMP NULL` | 否 | `NULL` | 最近一次下线的时刻，与 `offlined_by` 同刻写入、同样不清空。两列只在后台文章列表下发（`AdminArticleVO` 给 `offlinedAt` 与操作者 `offlinedByName`，姓名靠 `LEFT JOIN users` 取），公开详情响应里没有它们 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 创建时间 |
-| `updated_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 编辑时间；后台草稿列表按它排序 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键；**应用层雪花 ID，无 `AUTO_INCREMENT`**（§1.1.1）；前台路由直接使用它，无 slug |
+| `title` | 标题 |
+| `content` | **Markdown 源文**，不在库内渲染 |
+| `excerpt` | 摘要；**服务端由 `content` 派生**，作者侧不填（§1.7、business-model.md §4.2 第 6 条） |
+| `cover` | 封面图 MinIO **绝对 URL** |
+| `author_id` | 逻辑引用 `users.id`（用户雪花 ID）；实际只有博主（`admin`）发文 |
+| `category_id` | 逻辑引用 `categories.id`；定时/立即发布要求已选分类，但 DB 不设非空 |
+| `status` | 状态机见 §5.1；`offline`=已下线，收回对外可见性但保留 `published_at`，仅作者与博主可见 |
+| `is_top` | `1` 置顶 / `0` 普通；参与列表默认排序 |
+| `top_order` | 置顶权重，**越大越靠前，且仅 `is_top = 1` 时参与排序**（`latest` 与 `recommended` 两个分支按 `is_top DESC, top_order DESC` 打头，口径见 business-model.md §3.2「排序参数」）；`NOT NULL` 带默认值，因为排序谓词要的是可比而不是可空 |
+| `view_count` | 冗余计数，规则见 §5.2 |
+| `like_count` | 冗余计数，规则见 §5.2 |
+| `comment_count` | 冗余计数，仅 `approved` 计入，规则见 §5.2 |
+| `published_at` | **首次对外可见的时刻**，语义见 §5.3 |
+| `offlined_by` | 最近一次执行「下线」的操作者用户 ID（雪花值，§1.1 例外三）。**重新上线不清空**：下架留痕的意义就在于执行者抹不掉它，所以这一列不随状态回摆而消失 |
+| `offlined_at` | 最近一次下线的时刻，与 `offlined_by` 同刻写入、同样不清空。两列只在后台文章列表下发（`AdminArticleVO` 给 `offlinedAt` 与操作者 `offlinedByName`，姓名靠 `LEFT JOIN users` 取），公开详情响应里没有它们 |
+| `created_at` | 创建时间 |
+| `updated_at` | 编辑时间；后台草稿列表按它排序 |
 
 ### 2.5 `post_tags` — 文章与标签关联表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `post_id` | `BIGINT` | 是 | — | 联合主键之一，逻辑引用 `posts.id`（雪花值） |
-| `tag_id` | `INT` | 是 | — | 联合主键之一，逻辑引用 `tags.id` |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `post_id` | 联合主键之一，逻辑引用 `posts.id`（雪花值） |
+| `tag_id` | 联合主键之一，逻辑引用 `tags.id` |
 
 无时间列、无额外列。文章的标签集合以「全删该 `post_id` 的行 → 重新插入」方式整体替换。
 
 ### 2.6 `comments` — 文章评论表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `post_id` | `BIGINT` | 是 | — | 逻辑引用 `posts.id`（雪花值） |
-| `user_id` | `BIGINT` | 否 | `NULL` | 逻辑引用 `users.id`（用户雪花 ID）；**`NULL` = 匿名访客**；值由服务端从安全上下文回填，请求体携带的该值一律被覆盖 |
-| `content` | `TEXT` | 是 | — | 评论内容 |
-| `parent_id` | `INT` | 否 | `0` | **`0` = 根评论**；非 0 为父评论 `id`（自引用，无物理外键）；**回复只支持两级**，不嵌套 |
-| `status` | `ENUM('pending','approved','rejected')` | 是 | `'approved'` | 审核状态；DB 默认 `'approved'` **只对绕过服务层的直插 SQL 生效**，服务层按开关显式写 `'pending'` 或 `'approved'`（§5.6） |
-| `hit_word` | `VARCHAR(50)` | 否 | `NULL` | 机审命中的**第一个**违禁词，值拷贝自 `banned_words.word`。只有落 `pending` 的评论会写：命中 `reject` 词的评论直接被拒、根本不入库，未命中为 `NULL`。**不是引用也不随词库变更**——删词、改词、停用词都不回写存量评论（§2.12） |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 评论时间 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `post_id` | 逻辑引用 `posts.id`（雪花值） |
+| `user_id` | 逻辑引用 `users.id`（用户雪花 ID）；**`NULL` = 匿名访客**；值由服务端从安全上下文回填，请求体携带的该值一律被覆盖 |
+| `content` | 评论内容 |
+| `parent_id` | **`0` = 根评论**；非 0 为父评论 `id`（自引用，无物理外键）；**回复只支持两级**，不嵌套 |
+| `status` | 审核状态；DB 默认 `'approved'` **只对绕过服务层的直插 SQL 生效**，服务层按开关显式写 `'pending'` 或 `'approved'`（§5.6） |
+| `hit_word` | 机审命中的**第一个**违禁词，值拷贝自 `banned_words.word`。只有落 `pending` 的评论会写：命中 `reject` 词的评论直接被拒、根本不入库，未命中为 `NULL`。**不是引用也不随词库变更**——删词、改词、停用词都不回写存量评论（§2.12） |
+| `created_at` | 评论时间 |
 
 ### 2.7 `likes` — 文章点赞表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键（保留理由见 §1.1） |
-| `post_id` | `BIGINT` | 是 | — | 逻辑引用 `posts.id`（雪花值） |
-| `user_id` | `BIGINT` | 是 | — | 逻辑引用 `users.id`（用户雪花 ID）；**点赞必须登录，本列不可空** |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 点赞时间 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键（保留理由见 §1.1） |
+| `post_id` | 逻辑引用 `posts.id`（雪花值） |
+| `user_id` | 逻辑引用 `users.id`（用户雪花 ID）；**点赞必须登录，本列不可空** |
+| `created_at` | 点赞时间 |
 
 唯一键 `uk_post_user (post_id, user_id)` 是「一人一赞」的**唯一硬保证**，去重不依赖应用层判断。点赞目标只有文章，**不引入 `target_type` 列**。
 
@@ -221,13 +222,13 @@
 
 ### 2.9 `visit_logs` — 访问日志表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `post_id` | `BIGINT` | 否 | `NULL` | 逻辑引用 `posts.id`（雪花值）；**`NULL` = 非文章页访问**。当前唯一的写入方是文章详情（business-model.md §2.11），所以实际行恒非空；列仍留可空，非文章页访问将来若要记账不必动表 |
-| `ip` | `VARCHAR(45)` | 是 | — | 访问者 IP，按 IPv6 文本长度取值。**存原始值**，脱敏只发生在读取侧（见下方「脱敏与检索口径」） |
-| `user_agent` | `VARCHAR(255)` | 否 | `NULL` | UA，原样存文本，不做解析列。写入侧按列宽截断到 255（伪造的超长串不该让整条 INSERT 失败）；归类是读时算的，不落列 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 访问时间。应用层不赋值，一律走库默认值 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `post_id` | 逻辑引用 `posts.id`（雪花值）；**`NULL` = 非文章页访问**。当前唯一的写入方是文章详情（business-model.md §2.11），所以实际行恒非空；列仍留可空，非文章页访问将来若要记账不必动表 |
+| `ip` | 访问者 IP，按 IPv6 文本长度取值。**存原始值**，脱敏只发生在读取侧（见下方「脱敏与检索口径」） |
+| `user_agent` | UA，原样存文本，不做解析列。写入侧按列宽截断到 255（伪造的超长串不该让整条 INSERT 失败）；归类是读时算的，不落列 |
+| `created_at` | 访问时间。应用层不赋值，一律走库默认值 |
 
 **这是纯追加表**：只 INSERT，只有保留期任务 DELETE，没有 UPDATE。不参与前台展示与任何列表排序，不建聚合派生表、不建日汇总（§1.7）。
 
@@ -258,13 +259,13 @@
 
 ### 2.10 `site_settings` — 站点配置表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `setting_key` | `VARCHAR(64)` | 是 | — | 主键，**下划线命名**的配置键 |
-| `setting_value` | `VARCHAR(255)` | 否 | `NULL` | 配置值，一律以字符串存储 |
-| `updated_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 更新时间（本表无 `created_at`） |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `setting_key` | 主键，**下划线命名**的配置键 |
+| `setting_value` | 配置值，一律以字符串存储 |
+| `updated_at` | 更新时间（本表无 `created_at`） |
 
-当前有效键如下（前两个是布尔语义字符串，`about_*` 是文本）：
+当前有效键如下（前两个是布尔语义字符串，`about_*` 是文本）。**本表是全仓唯一的键位登记处**：默认值与合法区间只写在这里一处，`business-model.md` 引用键名与语义而不重述数值：
 
 | 键 | 含义 | 键未配置时的默认（在代码里，不在库里） |
 |---|---|---|
@@ -292,12 +293,12 @@
 
 ### 2.11 `follows` — 用户关注关系表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `author_id` | `BIGINT` | 是 | — | 被关注用户，逻辑指向 `users.id`（用户雪花 ID） |
-| `follower_id` | `BIGINT` | 是 | — | 关注者，逻辑指向 `users.id`（用户雪花 ID）；服务端由登录态回填 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 关注时间（本表无 `updated_at`：取关是删行，不是改状态） |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `author_id` | 被关注用户，逻辑指向 `users.id`（用户雪花 ID） |
+| `follower_id` | 关注者，逻辑指向 `users.id`（用户雪花 ID）；服务端由登录态回填 |
+| `created_at` | 关注时间（本表无 `updated_at`：取关是删行，不是改状态） |
 
 - `(author_id, follower_id)` 唯一，是**业务规则本身**：一个读者对一个作者至多一条关系，重复关注由 `INSERT IGNORE` 静默成为幂等成功。
 - **不建 `users` 侧的关注数冗余列**。关注数按本表实际条数即时 `COUNT`，与 `tags` 的文章计数同口径（§1.7）。单博主量级下没有为此建汇总表的空间，`page_views_daily` 一类预聚合表仍在 §6 的禁止清单里。
@@ -306,14 +307,14 @@
 
 ### 2.12 `banned_words` — 评论违禁词库表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `word` | `VARCHAR(50)` `UNIQUE` | 是 | — | 违禁词本体，唯一；存 trim 后的原样大小写，匹配时才两边转小写（business-model.md §4.4 第 2 条） |
-| `action` | `ENUM('pending','reject')` | 是 | `'pending'` | 命中后的处置动作：`pending` 落待审等人工裁决 / `reject` 直接拒绝、不入库 |
-| `is_enabled` | `TINYINT` | 否 | `1` | `1` 参与匹配 / `0` 停用；停用即保留词条但机审跳过它 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 添加时间 |
-| `updated_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 启停、改动作的时间 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `word` | 违禁词本体，唯一；存 trim 后的原样大小写，匹配时才两边转小写（business-model.md §4.4 第 2 条） |
+| `action` | 命中后的处置动作：`pending` 落待审等人工裁决 / `reject` 直接拒绝、不入库 |
+| `is_enabled` | `1` 参与匹配 / `0` 停用；停用即保留词条但机审跳过它 |
+| `created_at` | 添加时间 |
+| `updated_at` | 启停、改动作的时间 |
 
 - **它是内容数据，不是站点配置**，所以不入 `site_settings`（§2.10、§6）：一词一行、可分页检索、可逐条启停、可批量导入，这些都是 KV 单值给不了的；而 `setting_value VARCHAR(255)` 还给词库总量压了约 80 词的硬上限。管理入口在「评论管理」内，不在「系统设置」（ui-design.md §3.11）。
 - `word` 唯一是**去重的唯一硬保证**（定位同 §2.7 `uk_post_user`、§2.11 `uk_author_follower`）：单条添加撞词与批量导入的重复项都由它判定，不依赖应用层「先查后插」。唯一性随库默认 collation（§1.8 不显式指定），MySQL 8 默认的 `utf8mb4_0900_ai_ci` 大小写不敏感，故 `AD` 与 `ad` 是同一个词——这与「匹配时两边都转小写」的口径一致，不是巧合。
@@ -323,15 +324,15 @@
 
 ### 2.13 `login_logs` — 登录日志表
 
-| 字段 | 类型建议 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `id` | `INT` `AUTO_INCREMENT` | 是 | 自增 | 主键 |
-| `email` | `VARCHAR(255)` | 是 | — | **尝试登录时输入的邮箱，原样记录**，不要求账号存在（穷举者试的就是不存在的邮箱）。列宽与 `users.email` 一致，但**它不是引用**：`users` 里有没有这一行、此后改不改邮箱，都不回写本列（§1.5 的孤儿容忍在此不适用，因为压根没有引用） |
-| `user_id` | `BIGINT` | 否 | `NULL` | 逻辑引用 `users.id`（雪花值，§1.1 例外三）。**只有 `result='success'` 的行回填**，三种失败恒为 `NULL` |
-| `ip` | `VARCHAR(45)` | 是 | — | 来源地址，与 `visit_logs.ip` 同宽同规则（§1.8 不得缩短、§2.9 脱敏口径）。**存原始值**，脱敏只发生在读取侧，复用同一对 `IpMaskUtils.mask()` / `likePattern()` |
-| `user_agent` | `VARCHAR(255)` | 否 | `NULL` | UA 原样存文本，不做解析列；写入侧按列宽截断，归类是读时算的（与 §2.9 同一条规则，共用 `UserAgentClassifier`） |
-| `result` | `ENUM('success','wrong_password','locked','disabled')` | 是 | — | 四值是封闭集合（§1.6），与 `AuthService.login()` 的四个出口一一对应，见下方「四种结局」 |
-| `created_at` | `TIMESTAMP` | 否 | `CURRENT_TIMESTAMP` | 尝试时刻。应用层不赋值 |
+| 字段 | 说明（类型、必填、默认值一律看 `schema.sql`） |
+|---|---|
+| `id` | 主键 |
+| `email` | **尝试登录时输入的邮箱，原样记录**，不要求账号存在（穷举者试的就是不存在的邮箱）。列宽与 `users.email` 一致，但**它不是引用**：`users` 里有没有这一行、此后改不改邮箱，都不回写本列（§1.5 的孤儿容忍在此不适用，因为压根没有引用） |
+| `user_id` | 逻辑引用 `users.id`（雪花值，§1.1 例外三）。**只有 `result='success'` 的行回填**，三种失败恒为 `NULL` |
+| `ip` | 来源地址，与 `visit_logs.ip` 同宽同规则（§1.8 不得缩短、§2.9 脱敏口径）。**存原始值**，脱敏只发生在读取侧，复用同一对 `IpMaskUtils.mask()` / `likePattern()` |
+| `user_agent` | UA 原样存文本，不做解析列；写入侧按列宽截断，归类是读时算的（与 §2.9 同一条规则，共用 `UserAgentClassifier`） |
+| `result` | 四值是封闭集合（§1.6），与 `AuthService.login()` 的四个出口一一对应，见下方「四种结局」 |
+| `created_at` | 尝试时刻。应用层不赋值 |
 
 **这是纯追加表**：只 INSERT，只有保留期任务 DELETE，没有 UPDATE，也没有 DELETE 单行的入口（后台不提供删日志的能力——那正是留痕的意义）。
 
@@ -396,46 +397,50 @@
 
 ## 4. 索引建议
 
-### 4.1 必须存在（与 `schema.sql` 现值一致，逐条不可缺）
+### 4.1 索引的语义：为什么建、代价是什么
 
-| 表 | 索引 | 字段 | 类型 | 支撑的查询 / 作用 |
-|---|---|---|---|---|
-| `users` | 主键 | `id` | PRIMARY | 鉴权链每次请求按 id 重载用户（无用户缓存，故禁用即时生效） |
-| `users` | 唯一 | `email` | UNIQUE | 登录查询主路径；同时是邮箱修改时的冲突判据 |
-| `users` | 唯一 | `username` | UNIQUE | 注册时的昵称冲突判据 |
-| `categories` | 主键 | `id` | PRIMARY | 分类被 `posts.category_id` 按 id 引用 |
-| `categories` | 唯一 | `name` | UNIQUE | 分类名冲突判据 |
-| `tags` | 主键 | `id` | PRIMARY | 标签经 `post_tags.tag_id` 按 id 引用 |
-| `tags` | 唯一 | `name` | UNIQUE | 标签名冲突判据 |
-| `posts` | 主键 | `id` | PRIMARY | 详情、编辑回显 |
-| `posts` | `idx_status_time` | `(status, published_at)` | 普通 | **前台列表可见性过滤 + 定时发布扫描**；支撑「`status='published'` 按发布时刻排序」 |
-| `posts` | `idx_author` | `author_id` | 普通 | 后台按作者筛选、`countByAuthor` |
-| `posts` | `idx_category` | `category_id` | 普通 | 分类维度列表、分类文章数即时统计 |
-| `posts` | `ft_title_content` | `(title, content)` | **FULLTEXT**（`WITH PARSER ngram`） | 站内搜索不含 ASCII 字母与符号、满 2 字的关键词；依赖 `ngram_token_size`（MySQL 8 默认 2），且默认停用词表的单字母 `a`/`i` 会被 ngram 当分隔符、含英文/符号的关键词切不出词元，这类关键词与单字查询一样退回 `idx_*` + LIKE，见 §4.3 |
-| `post_tags` | 主键 | `(post_id, tag_id)` | PRIMARY | 按文章装载标签；同文章同标签去重 |
-| `comments` | 主键 | `id` | PRIMARY | 按 id 定位评论 |
-| `comments` | `idx_post_id` | `post_id` | 普通 | 前台文章评论列表（根 + 回复装载） |
-| `comments` | `idx_status_time` | `(status, created_at)` | 普通 | 后台待审列表（`pending` 按时间）、Dashboard 待审计数 |
-| `comments` | `idx_user` | `user_id` | 普通 | 评论发布间隔判定 `findLastCreatedAtByUserId`（`MAX(created_at) WHERE user_id = ?`）——没有它每条评论都要扫全表 |
-| `likes` | 主键 | `id` | PRIMARY | 行标识 |
-| `likes` | `uk_post_user` | `(post_id, user_id)` | **UNIQUE** | **防重复点赞的唯一硬保证**；`INSERT` 忽略重复；`DELETE` 按此前缀定位；`COUNT(*)` 按 `post_id` 前缀走索引 |
-| `likes` | `idx_user` | `user_id` | 普通 | 「点赞过的文章」按用户取回（`findLikedByUser` 以 `l.user_id` 为谓词、按 `l.created_at` 倒序）——`uk_post_user` 的最左列是 `post_id`，反方向只能靠它 |
-| `visit_logs` | 主键 | `id` | PRIMARY | 行标识 |
-| `visit_logs` | `idx_post_time` | `(post_id, created_at)` | 普通 | 明细的「按文章筛选」走最左列；后台分析里按篇查访问 |
-| `visit_logs` | `idx_created_at` | `created_at` | 普通 | **一切时间范围扫描**：概览、趋势、三个 Top 榜、明细与保留期删除的谓词都是 `created_at` 的一个区间。`idx_post_time` 的最左列是 `post_id`，救不了不带文章的窗口查询，2026-10-03 随访问日志启用一并建 |
-| `site_settings` | 主键 | `setting_key` | PRIMARY | 按键读配置 |
-| `follows` | 主键 | `id` | PRIMARY | 行标识 |
-| `follows` | `uk_author_follower` | `(author_id, follower_id)` | **UNIQUE** | **防重复关注的唯一硬保证**；`INSERT IGNORE` 靠它成为幂等成功；`DELETE` 按该对精确定位；`COUNT(*)` 按 `author_id` 前缀走索引 |
-| `follows` | `idx_follower` | `follower_id` | 普通 | 「我关注的」名单与 `COUNT(*) WHERE follower_id = ?`（某人关注了几个人）——这两个方向都在 `uk_author_follower` 的最左列之外 |
-| `banned_words` | 主键 | `id` | PRIMARY | 行标识；启停与删除按 id 定位 |
-| `banned_words` | `uk_word` | `word` | **UNIQUE** | **词库去重的唯一硬保证**：单条添加撞词与批量导入的重复项都由它判定（§2.12） |
-| `login_logs` | 主键 | `id` | PRIMARY | 行标识 |
-| `login_logs` | `idx_email_time` | `(email, created_at)` | 普通 | 「某个邮箱被试了什么」是这张表的主问题：按邮箱定位 + 时间收敛。明细里那格邮箱关键词是 `LIKE '%kw%'`，走不上它（同 §4.3 对 `visit_logs` 的判断，保留是因为按邮箱精确定位这一路真实存在） |
-| `login_logs` | `idx_created_at` | `created_at` | 普通 | 三张计数卡（`>= CURDATE()`、`>= NOW() - 1 HOUR`）、Top 榜的全表聚合与保留期 DELETE 的谓词都是时间区间 |
+索引的全集（名字、字段、类型）以 `schema.sql` 为准，本文不列清单、也不声称「逐条不可缺」——那句承诺本身就是要漏的东西。**这一节只写 DDL 里读不出来的那半边：这条索引服务哪条查询、代价换来了什么。**表里给索引名（没有独立名字的写「主键/唯一 + 列」）只是为了让这一行能对上号，不是把定义抄第二遍。新增索引不要求同步本文，但**新增一条「非显然」的索引（联合顺序、全文、只为一个判定存在的）要在这里补一句理由**。
 
-### 4.2 唯一约束即索引，不得遗漏
+| 表 | 索引 | 为什么建 / 代价（索引定义看 `schema.sql`） |
+|---|---|---|
+| `users` | 主键（`id`） | 鉴权链每次请求按 id 重载用户（无用户缓存，故禁用即时生效） |
+| `users` | 唯一（`email`） | 登录查询主路径；同时是邮箱修改时的冲突判据 |
+| `users` | 唯一（`username`） | 注册时的昵称冲突判据 |
+| `categories` | 主键（`id`） | 分类被 `posts.category_id` 按 id 引用 |
+| `categories` | 唯一（`name`） | 分类名冲突判据 |
+| `tags` | 主键（`id`） | 标签经 `post_tags.tag_id` 按 id 引用 |
+| `tags` | 唯一（`name`） | 标签名冲突判据 |
+| `posts` | 主键（`id`） | 详情、编辑回显 |
+| `posts` | `idx_status_time` | **前台列表可见性过滤 + 定时发布扫描**；支撑「`status='published'` 按发布时刻排序」 |
+| `posts` | `idx_author` | 后台按作者筛选、`countByAuthor` |
+| `posts` | `idx_category` | 分类维度列表、分类文章数即时统计 |
+| `posts` | `ft_title_content` | 站内搜索不含 ASCII 字母与符号、满 2 字的关键词；依赖 `ngram_token_size`（MySQL 8 默认 2），且默认停用词表的单字母 `a`/`i` 会被 ngram 当分隔符、含英文/符号的关键词切不出词元，这类关键词与单字查询一样退回 `idx_*` + LIKE，见 §4.3 |
+| `post_tags` | 主键（`post_id` + `tag_id`） | 按文章装载标签；同文章同标签去重 |
+| `comments` | 主键（`id`） | 按 id 定位评论 |
+| `comments` | `idx_post_id` | 前台文章评论列表（根 + 回复装载） |
+| `comments` | `idx_status_time` | 后台待审列表（`pending` 按时间）、Dashboard 待审计数 |
+| `comments` | `idx_user` | 评论发布间隔判定 `findLastCreatedAtByUserId`（`MAX(created_at) WHERE user_id = ?`）——没有它每条评论都要扫全表 |
+| `likes` | 主键（`id`） | 行标识 |
+| `likes` | `uk_post_user` | **防重复点赞的唯一硬保证**；`INSERT` 忽略重复；`DELETE` 按此前缀定位；`COUNT(*)` 按 `post_id` 前缀走索引 |
+| `likes` | `idx_user` | 「点赞过的文章」按用户取回（`findLikedByUser` 以 `l.user_id` 为谓词、按 `l.created_at` 倒序）——`uk_post_user` 的最左列是 `post_id`，反方向只能靠它 |
+| `visit_logs` | 主键（`id`） | 行标识 |
+| `visit_logs` | `idx_post_time` | 明细的「按文章筛选」走最左列；后台分析里按篇查访问 |
+| `visit_logs` | `idx_created_at` | **一切时间范围扫描**：概览、趋势、三个 Top 榜、明细与保留期删除的谓词都是 `created_at` 的一个区间。`idx_post_time` 的最左列是 `post_id`，救不了不带文章的窗口查询，2026-10-03 随访问日志启用一并建 |
+| `site_settings` | 主键（`setting_key`） | 按键读配置 |
+| `follows` | 主键（`id`） | 行标识 |
+| `follows` | `uk_author_follower` | **防重复关注的唯一硬保证**；`INSERT IGNORE` 靠它成为幂等成功；`DELETE` 按该对精确定位；`COUNT(*)` 按 `author_id` 前缀走索引 |
+| `follows` | `idx_follower` | 「我关注的」名单与 `COUNT(*) WHERE follower_id = ?`（某人关注了几个人）——这两个方向都在 `uk_author_follower` 的最左列之外 |
+| `banned_words` | 主键（`id`） | 行标识；启停与删除按 id 定位 |
+| `banned_words` | `uk_word` | **词库去重的唯一硬保证**：单条添加撞词与批量导入的重复项都由它判定（§2.12） |
+| `login_logs` | 主键（`id`） | 行标识 |
+| `login_logs` | `idx_email_time` | 「某个邮箱被试了什么」是这张表的主问题：按邮箱定位 + 时间收敛。明细里那格邮箱关键词是 `LIKE '%kw%'`，走不上它（同 §4.3 对 `visit_logs` 的判断，保留是因为按邮箱精确定位这一路真实存在） |
+| `login_logs` | `idx_created_at` | 三张计数卡（`>= CURDATE()`、`>= NOW() - 1 HOUR`）、Top 榜的全表聚合与保留期 DELETE 的谓词都是时间区间 |
 
-`users.email`、`users.username`、`categories.name`、`tags.name`、`likes (post_id, user_id)`、`follows (author_id, follower_id)`、`banned_words.word` 共 7 处唯一约束是**业务规则本身**，不是性能优化。少了它们，注册重名、重复点赞、重复关注、同一个词重复入库等约束在库层面失守。
+### 4.2 唯一约束是业务规则，不是性能优化
+
+库里每一处 `UNIQUE` 都在替一条业务规则背书（一人一赞、一读者对一作者至多一条关注、词库不重复、邮箱与昵称不撞）——**去掉它，规则就只在应用层成立，两个并发写能同时通过检查**。哪些列上有唯一约束看 `schema.sql` 的 `UNIQUE KEY`，本文不列清单；本文只要求一件事：**新增唯一约束时，回来在对应那张表的说明里写清它背书的是哪条规则**，因为它不是优化，删它的人必须看得见后果。
+
+也因此，`INSERT IGNORE` + 唯一键是这两条幂等路径的**唯一硬保证**（§5.1、business-model.md §4.5 第 4 条与 §4.7 第 3 条），不依赖「先查后插」。
 
 ### 4.3 明确不要建的索引
 
@@ -484,7 +489,7 @@
 
 **阅读链路上的 Redis 键位**（前缀统一为 `article:`，与 §5.4 的 `auth:` 键位并列；库里无对应表，见 §6）：
 
-- `article:view_dedup:{postId}` — Set，成员是访问者标识：登录用户 `user:{userId}`（与点赞、关注同源，都从安全上下文回库取用户），匿名 `ip:{客户端地址}`。地址一律出自 `IpUtils.clientIp()`：**默认只取 `remoteAddr`**，只有部署形态确认挂在可信反向代理之后（`app.security.trust-forwarded-for=true`，本机默认 `false`）才改取 `X-Forwarded-For` 首值——那个头是客户端自己就能写的，直连时采信等于让爆破者随手换一个计数键、也让日志记下假地址。容器档里 nginx 是唯一入口且以覆盖方式写该头，所以那一档默认采信（business-model.md §3.3「自托管部署」）。**`SADD` + 判 `TTL` + `EXPIRE` 三步由一条 Lua 脚本一次往返完成**，返回的新成员数 > 0 才算本窗口首次访问、才允许 `view_count` 自增。合成一条是因为分三条发存在崩溃缝：`SADD` 之后、`EXPIRE` 之前进程挂掉会留下一枚永不过期的集合，此后这篇文章的窗口永不关闭，阅读计数静默停摆且不报错。窗口 3600 秒，**只在键尚无 TTL 时设置**（脚本判 `TTL < 0` 才 `EXPIRE`，顺带把改造前遗留的无 TTL 旧键补上）——若每个新访客都续期，持续流量下窗口永不关闭，先来的访客反而永久不再计数。
+- `article:view_dedup:{postId}` — Set，成员是访问者标识：登录用户 `user:{userId}`（与点赞、关注同源，都从安全上下文回库取用户），匿名 `ip:{客户端地址}`。地址一律出自 `IpUtils.clientIp()`：**默认只取 `remoteAddr`**，只有部署形态确认挂在可信反向代理之后（`app.security.trust-forwarded-for=true`，本机默认 `false`）才改取 `X-Forwarded-For` 首值——那个头是客户端自己就能写的，直连时采信等于让爆破者随手换一个计数键、也让日志记下假地址。容器档里 nginx 是唯一入口且以覆盖方式写该头，所以那一档默认采信（business-model.md §3.3「自托管部署」）。**`SADD` + 判 `TTL` + `EXPIRE` 三步由一条 Lua 脚本一次往返完成**，返回的新成员数 > 0 才算本窗口首次访问、才允许 `view_count` 自增。合成一条是因为分三条发存在崩溃缝：`SADD` 之后、`EXPIRE` 之前进程挂掉会留下一枚永不过期的集合，此后这篇文章的窗口永不关闭，阅读计数静默停摆且不报错。窗口是一小时（秒数见 `ArticleService` 的调用处），**只在键尚无 TTL 时设置**（脚本判 `TTL < 0` 才 `EXPIRE`，顺带把改造前遗留的无 TTL 旧键补上）——若每个新访客都续期，持续流量下窗口永不关闭，先来的访客反而永久不再计数。
 - 去重是**尽力而为的防刷，不是硬保证**：`X-Forwarded-For` 客户端可控，恶意访客换申报值即可绕开。地址在这枚 Set 里只作成员存在 1 小时，Set 本身不是存储；但**同一次判定会异步落一行 `visit_logs`**，那里留 180 天（§2.9），只服务后台「日志管理」那一页，且出参一律脱敏成 `112.10.*.*`，完整地址不进任何响应（business-model.md §2.11）。
 
 ### 5.3 `published_at` 的语义（易错点）
@@ -499,13 +504,13 @@
 
 - **JWT subject 是邮箱，不是用户 id**。因此 `users.email` 的 UNIQUE 兼具冲突判据作用，且修改邮箱后旧 token 的 subject 再也查不到用户 → **改邮箱必须强制重新登录**。不改 subject（会让全站现存 token 一次性失效）。
 - 评论的 `user_id` **只由服务端从安全上下文回填**，请求体携带的值一律覆盖；查不到对应用户时拒绝写入。生成接口时不要留「客户端可传 user_id」的口子。
-- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`，键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**2026-10-03 增量：所有含 `{email}` 的键统一用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §3.2「验证码与注册的防刷」）：
-  - 码值键 `auth:code:{email}`（注册）、`auth:code-change:{email}`（改邮箱）、`auth:code-reset:{email}`（重置口令）：TTL 5min、一次性消费，命中即删。
-  - 发码频控键 `auth:code-limit:{purpose}:{email}`（TTL 60s）与 `auth:code-daily:{purpose}:{email}`（TTL 至当日 24:00），频控口径见 business-model.md §3.2。**2026-10-03 增量**：另加两层兜底日额度——`auth:code-ip-daily:{客户端地址}`（每来源地址每日 30 次）与 `auth:code-global-daily`（全站每日 500 次），堵「持邮箱列表绕开邮箱维度发码」的邮件轰炸口子。
-  - 防穷举计数键 `auth:code-try:{purpose}:{email}`：首错时设 TTL 5min（与码值键同寿），错满 5 次连带删掉码值键，校验成功时删除。按用途分键，注册码错满不牵连改邮箱码。
-  - 登录防爆破计数**两层**键。来源地址层 `auth:login-fail:{email}:{客户端地址}`：`INCR` 计数，首错与计满那一次都把 TTL 重新设为 `login_lock_minutes`（默认 15，合法 5–60，见 §2.10），计满 `login_max_failures`（默认 5，合法 3–10）即锁，**两层计数任一到阈都算锁**（来源地址层挡单点穷举，邮箱层挡换 IP 的分布式穷举），登录成功**两层一起删**——只清来源地址那层，换 IP 攒下的邮箱计数会一直压着下一个正常登录。邮箱层 `auth:login-fail-global:{email}`：**不带地址**，堵「轮换来源地址就能对同一个邮箱无限试口令」这条绕法，阈值取来源地址层的 5 倍但不低于 20 次——按配置值直接乘会在管理员把阈值调到 3 时得到 15 这种过紧的额度，把网吧、公司出口这类共享地址下的正常用户累加锁死。两层都是邮箱维度分键（`trim + 转小写`，同上），地址口径与阅读去重同源（§5.2）。语义见 business-model.md §2.12
-  - token 失效水位键 `auth:token-epoch:{email}`：值为置位时刻的秒级时间戳，TTL = token 有效期（7 天——那之前签发的 token 早已自然过期）。`iat` 早于水位的 token 按未登录处理，见 §5.1。**2026-10-03 增量**：置位点从「口令的两处写入」扩为三处——新增登出 `POST /auth/logout` 同样推水位（作废该账号全部在存 token）。
-  - **2026-10-03 增量（上传额度）**：`upload:daily:{userId}`（TTL 24h）按用户计当日上传次数，上限 100 次，计满后 `/upload/*` 全部端点拒绝转存。
+- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`。**下面登记的是键名与用途——键名是对外契约（前端、运维脚本、排查时都在按它 grep），本文持有；时长、次数、阈值这类数值一律不写，它们以代码常量与 §2.10 那两键为准，抄一遍就多一处会过期的地方。**键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**2026-10-03 增量：所有含 `{email}` 的键统一用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §3.2「验证码与注册的防刷」）：
+  - 码值键 `auth:code:{email}`（注册）、`auth:code-change:{email}`（改邮箱）、`auth:code-reset:{email}`（重置口令）：三用途三名分列即契约——注册码、改邮箱码、重置口令码互不通用。一次性消费、命中即销毁，存活时长看 `VerificationCodeService` 的常量。
+  - 发码频控键 `auth:code-limit:{purpose}:{email}`（同邮箱同用途的重发间隔）与 `auth:code-daily:{purpose}:{email}`（该邮箱当日额度）；另有两层兜底日额度 `auth:code-ip-daily:{客户端地址}` 与 `auth:code-global-daily`，堵「握着邮箱列表来发码」这条邮件轰炸口子——邮箱维度的额度对这种打法无效。窗口与次数见 `VerificationCodeService`，口径见 business-model.md §3.2。
+  - 防穷举计数键 `auth:code-try:{purpose}:{email}`：按用途分键（注册码错满不牵连改邮箱码），与码值键同寿、错满把码一起作废、校验通过即清零。次数见代码。
+  - 登录防爆破计数**两层**键。来源地址层 `auth:login-fail:{email}:{客户端地址}`：`INCR` 计数，首错与计满那一次都把 TTL 重新设为 `login_lock_minutes`，计满 `login_max_failures` 即锁（两个键的默认值与合法区间只在 §2.10 记一处），**两层计数任一到阈都算锁**（来源地址层挡单点穷举，邮箱层挡换 IP 的分布式穷举），登录成功**两层一起删**——只清来源地址那层，换 IP 攒下的邮箱计数会一直压着下一个正常登录。邮箱层 `auth:login-fail-global:{email}`：**不带地址**，堵「轮换来源地址就能对同一个邮箱无限试口令」这条绕法，阈值 = 地址层配置值 × 5 但不低于一个地板值（`AuthService` 里的换算与地板常量各一处；乘而不直接用配置值，是因为管理员把阈值调到 3 时，纯乘 5 会得到 15 这种过紧的全局额度，把网吧、公司出口这类共享地址下的正常用户累加锁死）。两层都是邮箱维度分键（`trim + 转小写`，同上），地址口径与阅读去重同源（§5.2）。语义见 business-model.md §2.12
+  - token 失效水位键 `auth:token-epoch:{email}`：值为置位时刻的秒级时间戳，TTL 与 token 有效期同值（那之前签发的 token 早已自然过期，水位不必比 token 活得久）。`iat` 早于水位的 token 按未登录处理，见 §5.1。**2026-10-03 增量**：置位点从「口令的两处写入」扩为三处——新增登出 `POST /auth/logout` 同样推水位（作废该账号全部在存 token）。
+  - 上传日额度键 `upload:daily:{userId}`：按用户计当日上传次数，计满后 `/upload/*` 全部端点拒绝转存。次数与窗口见代码常量。
 
 ### 5.5 URL 存储的既有事实（重要）
 
@@ -553,7 +558,7 @@
 
 | 不建 | 原因 / 现有替代 |
 |---|---|
-| `email_verifications` / `verification_codes` / `captcha` | 验证码只在 Redis，TTL 5min、一次性消费；落库反而留下无用敏感数据 |
+| `email_verifications` / `verification_codes` / `captcha` | 验证码只在 Redis，短 TTL、一次性消费；落库反而留下无用敏感数据 |
 | `password_reset_tokens` / `password_recoveries` | 找回密码已建成链路（`POST /auth/password/code` + `POST /auth/password/reset`），但它和注册、改邮箱共用同一套 Redis 码值键（`auth:code-reset:{email}`，§5.4），**口令重置不需要任何表**：一次性、5 分钟过期、命中即删，落库只会留下一批永远用不上的过期凭据 |
 | `sessions` / `token_blacklist` / `revoked_tokens` | 无状态 JWT；禁用与角色变更靠「每次请求回库重载用户」即时生效 |
 | `roles` / `permissions` / `user_roles` / `role_permissions`（RBAC 三件套） | 角色是 `users.role` 单列 `ENUM('admin','user')`，权限模型只有「博主 / 读者」两级 |
