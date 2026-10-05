@@ -60,7 +60,7 @@ mysql -u root -p cloudlog < docs/schema.sql
 mysql -u root -p cloudlog < docs/data.sql
 ```
 
-`docs/data.sql` 是一份自包含的演示/测试数据集（11 张表共 339 行）：23 个用户（2 个 admin + 21 个普通用户，含 1 个禁用账号）、28 篇覆盖四态（draft / published / scheduled / offline）与置顶、未分类、多作者的中文技术文章，以及三态评论（含两级回复与匿名评论）、点赞、访问日志、关注关系与违禁词库。所有账号密码均为 `123456`，博主账号 `tcloud@example.com`。其中两个小 ID 账号（`author@example.com`、`alex@example.com`）是为 mapper 层与过滤链测试写死的取值补的锚点，理由写在文件内 §12 的注释里。它只含 INSERT（事务包裹，一次成功或整体回滚），不建表也不删表——必须在 `schema.sql` 之后、且只在空库上导入一次，重复执行会主键冲突；结构变更后需重新生成该文件。
+`docs/data.sql` 是一份自包含的演示/测试数据集（**表数与行数看该文件头部的统计注释，本 README 不重述**——改一次种子就得回来改一次这里，而这种数字不承载任何决策）：内容覆盖用户（含 1 个禁用账号）、四态文章（`draft` / `published` / `scheduled` / `offline`，含置顶、未分类、多作者的中文技术文章）、三态评论（含两级回复与匿名评论）、点赞、访问日志、关注关系与违禁词库。所有账号密码均为 `123456`，博主账号 `tcloud@example.com`。其中两个小 ID 账号（`author@example.com`、`alex@example.com`）是为 mapper 层与过滤链测试写死的取值补的锚点，理由写在文件内 §12 的注释里。它只含 INSERT（事务包裹，一次成功或整体回滚），不建表也不删表——必须在 `schema.sql` 之后、且只在空库上导入一次，重复执行会主键冲突；结构变更后需重新生成该文件。
 
 ### 2. 后端（cloudlog_api/）
 
