@@ -29,7 +29,7 @@ cloudlog/
 - 互动：评论（两级回复，违禁词机审 + 人工审核）、点赞、关注作者；**作者主页 `/authors/:id` 四栏（TA 的文章 / 关注中 / 粉丝 / 点赞）公开可读**，名单行只出头像/昵称/简介/职业，不含邮箱与角色；账号被禁用时这一页与详情页一样按「不存在」响应（`docs/business-model.md` §2.2、§3.2）
 - 站点运营：后台文章/评论/分类/标签/用户管理、站点开关、评论字数上限与发布间隔、站点信息（名称/备案号/域名）、关于页文案配置、访问日志与登录日志（概览/趋势/Top 榜/明细，来源地址一律脱敏成 `112.10.*.*`）
 - 详情页的标题/描述/关键词由服务端按回落链**合成**（标题拼站点名、描述取摘要、关键词取标签名），**没有手填入口**——`seo_meta` 表与后台「待补全 SEO」清单已于 2026-10-03 整条删除（`docs/business-model.md` §2.10）；`robots.txt` / `sitemap.xml` / `feed.xml` 由后端直出
-- 登录日志：后台可查登录成败与爆破尝试（概览 / 攻击 Top 榜 / 明细，来源地址脱敏），锁定阈值与时长在后台可调（默认 5 次 / 15 分钟）
+- 登录日志：后台可查登录成败与爆破尝试（概览 / 攻击 Top 榜 / 明细，来源地址脱敏），锁定阈值与时长在后台可调（默认值与合法区间看后台那张卡的说明，接口随响应下发）
 - 图片存储基于 MinIO（文章配图、封面与头像上传）
 
 ## 技术栈
@@ -98,7 +98,7 @@ npm run dev
 mysql -u root -p cloudlog -e "UPDATE users SET role = 'admin' WHERE email = '你的注册邮箱'"
 ```
 
-还没配真实 SMTP 时收不到验证码邮件——码只写 Redis、不打日志，5 分钟过期、校验通过即销毁。点过「发送验证码」之后直接把它读出来：
+还没配真实 SMTP 时收不到验证码邮件——码只写 Redis、不打日志，短 TTL（默认 5 分钟）内有效、校验通过即销毁。点过「发送验证码」之后直接把它读出来：
 
 ```bash
 redis-cli GET "auth:code:你的注册邮箱" | tr -d '"'
@@ -243,4 +243,4 @@ find /var/backups/cloudlog -name '*.sql.gz' -mtime +14 -delete
 
 ## 持续集成
 
-`.github/workflows/ci.yml` 在每次 push/PR 时跑两件事：**后端**用临时 MySQL + Redis 服务容器（凭据经环境变量覆盖，测试前依次导入 `docs/schema.sql` 与 `docs/data.sql`——后者在这里承担 fixture 角色，只导结构会红 21 条）跑 `mvn -B test`；**前端**依次 `npm ci` → `npm run test`（vitest）→ `npm run build`（`build` 脚本本身 `run-p type-check build-only`，所以类型检查在构建里跑）。合并前绿灯是硬门槛——后端全量测试三百余项、前端十余项用例（**具体数目随用例增删在变，以 `docs/business-model.md` §3.3 的当轮记录为准**），本地跑一遍不便宜，交给 CI 兜底。
+`.github/workflows/ci.yml` 在每次 push/PR 时跑两件事：**后端**用临时 MySQL + Redis 服务容器（凭据经环境变量覆盖，测试前依次导入 `docs/schema.sql` 与 `docs/data.sql`——后者在这里承担 fixture 角色，只导结构会让六个依赖种子数据的类红）跑 `mvn -B test`；**前端**依次 `npm ci` → `npm run test`（vitest）→ `npm run build`（`build` 脚本本身 `run-p type-check build-only`，所以类型检查在构建里跑）。合并前绿灯是硬门槛。**用例总数不在文档里登记**（任何一次提交都会让它过期，而它不承载任何决策）：要当下值就跑 `npm run test`、`mvn -B test`，或直接看 CI 作业的日志。本地跑一遍不便宜，交给 CI 兜底。
