@@ -12,6 +12,13 @@
     <select id="findById" resultType="com.ayun.entity.User">
         SELECT * FROM users WHERE id = #{id}
     </select>
+
+    <!-- 作者主页四个读端点走这条：禁用账号从公开面撤下，与「不存在」同一个 404，
+         不给出「存在但被禁用」的差异反馈。两条写路径（关注/取关）仍用 findById——
+         取关必须始终可行，否则对方一旦被禁用，这条关系就永远取消不掉 -->
+    <select id="findVisibleById" resultType="com.ayun.entity.User">
+        SELECT * FROM users WHERE id = #{id} AND status = 1
+    </select>
     
     <!-- id 由 Service 层以雪花 ID 显式生成并写入，不经数据库自增回填 -->
     <insert id="insert">

@@ -28,6 +28,16 @@ public interface UserMapper {
     User findById(@Param("id") Long id);
 
     /**
+     * 公开可见的用户：作者主页四个读端点（身份 / 关注中 / 粉丝 / 点赞）的唯一取人路径。
+     * 「禁用即从公开面撤下」写在 SQL 谓词里而不是各 service 的 if 里——与草稿属主校验同一写法：
+     * 判据散在调用点上就会漏判，收进谓词只剩一处。关注与取关两条写路径仍用 findById
+     * （取关必须始终可行，否则对方一旦被禁用，这条关系就永远留在名单里取消不掉）
+     * @param id 用户 ID（雪花值）
+     * @return 正常状态的用户；禁用或不存在都返回 null
+     */
+    User findVisibleById(@Param("id") Long id);
+
+    /**
      * 插入新用户
      */
     int insert(User user);

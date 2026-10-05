@@ -142,14 +142,14 @@ public class FollowService {
 
     /**
      * 作者主页「关注中」栏：任意用户关注的名单，公开可读，行内带浏览者自己的关注状态。
-     * 与 listFollowing 的区别只在属主来源——这条按客户端传入的 ID 查，所以先确认这个人还在
+     * 与 listFollowing 的区别只在属主来源——这条按客户端传入的 ID 查，所以先确认这个人公开可见
      * @param userId 作者用户 ID
      * @param page 页码
      * @param pageSize 每页条数
      * @return 分页的用户简要视图（同样不含邮箱与角色）
      */
     public PageResult<UserBriefVO> listFollowingOf(Long userId, Integer page, Integer pageSize) {
-        requireUser(userId);
+        requireVisibleUser(userId);
         startPage(page, pageSize);
         return toPage(annotateViewerState(followMapper.findFollowing(userId)));
     }
@@ -162,7 +162,7 @@ public class FollowService {
      * @return 分页的用户简要视图（同样不含邮箱与角色）
      */
     public PageResult<UserBriefVO> listFollowersOf(Long userId, Integer page, Integer pageSize) {
-        requireUser(userId);
+        requireVisibleUser(userId);
         startPage(page, pageSize);
         return toPage(annotateViewerState(followMapper.findFollowers(userId)));
     }
@@ -208,6 +208,17 @@ public class FollowService {
 
     private void requireUser(Long authorId) {
         if (userMapper.findById(authorId) == null) {
+            throw new NotFoundException("用户不存在或已注销");
+        }
+    }
+
+    /**
+     * 作者主页读路径的取人判据：不存在、已注销、已禁用三种情况同一个 404、同一句话。
+     * 只约束这一页的主语（TA 是谁），名单里的成员行不过滤——关注数是 COUNT(follows) 的结果，
+     * 把禁用中的成员从名单里挑掉就会让「行数」与「计数」对不上；留痕那条口径见 business-model.md §6
+     */
+    private void requireVisibleUser(Long userId) {
+        if (userMapper.findVisibleById(userId) == null) {
             throw new NotFoundException("用户不存在或已注销");
         }
     }

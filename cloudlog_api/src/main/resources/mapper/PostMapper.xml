@@ -211,7 +211,9 @@
             </if>
             <include refid="draftScope"/>
         </where>
-        ORDER BY p.updated_at DESC
+        <!-- 末位 id 是全序尾键：updated_at 同秒并列时缺它会让 PageHelper 的 LIMIT/OFFSET
+             在翻页边界上重复或漏取行，findMine 与 findLikedByUser 同一条理由 -->
+        ORDER BY p.updated_at DESC, p.id DESC
     </select>
 
     <!-- 状态视图的计数：与列表同一组谓词，唯独不叠加状态，否则点中哪个哪个就把自己算成 0 -->
@@ -242,7 +244,7 @@
             <if test="year != null">AND YEAR(p.updated_at) = #{year}</if>
             <if test="month != null">AND MONTH(p.updated_at) = #{month}</if>
         </where>
-        ORDER BY p.updated_at DESC
+        ORDER BY p.updated_at DESC, p.id DESC
     </select>
 
     <!-- 我赞过的文章：以点赞时刻倒序，且只出已发布——赞过的内容后来被撤下时不该继续留在这里 -->
@@ -254,7 +256,7 @@
         LEFT JOIN categories c ON p.category_id = c.id
         WHERE l.user_id = #{userId}
           AND p.status = 'published'
-        ORDER BY l.created_at DESC
+        ORDER BY l.created_at DESC, p.id DESC
     </select>
 
     <!-- 属主谓词三条件齐全（id + author_id + 未发布状态），删除前的属主确认只认这条查询的结果 -->

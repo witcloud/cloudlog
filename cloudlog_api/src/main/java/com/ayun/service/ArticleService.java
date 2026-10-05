@@ -188,7 +188,7 @@ public class ArticleService {
      * @return 分页的文章视图
      */
     public PageResult<PostVO> getLikedPostsOf(Long userId, Integer page, Integer pageSize) {
-        if (userMapper.findById(userId) == null) {
+        if (userMapper.findVisibleById(userId) == null) {
             throw new NotFoundException("用户不存在或已注销");
         }
         PageHelper.startPage(page == null ? 1 : page, pageSize == null ? 10 : pageSize);

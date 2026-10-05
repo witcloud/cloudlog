@@ -244,7 +244,7 @@ class FollowServiceTest {
     void authorPageFollowerRowsCarryViewerState() {
         loginAsReader();
         when(userMapper.findByEmail("reader@ayun.com")).thenReturn(reader(88L));
-        when(userMapper.findById(1L)).thenReturn(User.builder().id(1L).build());
+        when(userMapper.findVisibleById(1L)).thenReturn(User.builder().id(1L).status(1).build());
         when(followMapper.findFollowers(1L)).thenReturn(List.of(
                 UserBriefVO.builder().id(3L).username("alex").build(),
                 UserBriefVO.builder().id(9L).username("wqq").build(),
@@ -265,7 +265,7 @@ class FollowServiceTest {
     @Test
     @DisplayName("匿名读作者主页两栏：保持 null 且不发起批量查询，让页面分得清「没登录」与「没关注」")
     void authorPageRowsStayUnannotatedForAnonymous() {
-        when(userMapper.findById(1L)).thenReturn(User.builder().id(1L).build());
+        when(userMapper.findVisibleById(1L)).thenReturn(User.builder().id(1L).status(1).build());
         when(followMapper.findFollowing(1L)).thenReturn(List.of(UserBriefVO.builder().id(3L).build()));
 
         UserBriefVO row = followService.listFollowingOf(1L, 1, 20).getList().get(0);
@@ -274,6 +274,34 @@ class FollowServiceTest {
         assertNull(row.getFollowsMe());
         verify(followMapper, never()).findFollowedAmong(any(), any());
         verify(followMapper, never()).findFollowingMeAmong(any(), any());
+    }
+
+    @Test
+    @DisplayName("被禁用的人没有作者主页：两栏名单都按「不存在」拒，且不发起名单查询")
+    void authorPageListsRejectDisabledSubject() {
+        // 主语走 findVisibleById（谓词含 status = 1），禁用与不存在同一个出口
+        when(userMapper.findVisibleById(7L)).thenReturn(null);
+
+        assertThrows(NotFoundException.class, () -> followService.listFollowersOf(7L, 1, 20));
+        assertThrows(NotFoundException.class, () -> followService.listFollowingOf(7L, 1, 20));
+        verify(followMapper, never()).findFollowers(any());
+        verify(followMapper, never()).findFollowing(any());
+    }
+
+    @Test
+    @DisplayName("取关永远可行：对方被禁用也该能拆掉这条关系，所以写路径仍按「存在」判")
+    void unfollowStillWorksForDisabledAuthor() {
+        loginAsReader();
+        when(userMapper.findByEmail("reader@ayun.com")).thenReturn(reader(88L));
+        // 写路径用 findById（不带 status 谓词）：禁用中的作者仍「存在」，删除照旧执行
+        when(userMapper.findById(7L)).thenReturn(User.builder().id(7L).status(0).build());
+        when(followMapper.existsByAuthorAndFollower(7L, 88L)).thenReturn(false);
+        when(followMapper.countByAuthor(7L)).thenReturn(4);
+
+        followService.unfollow(7L);
+
+        verify(followMapper).delete(7L, 88L);
+        verify(userMapper, never()).findVisibleById(any());
     }
 
     @Test

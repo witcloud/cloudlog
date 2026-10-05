@@ -26,12 +26,13 @@ public class AuthorProfileService {
     private FollowService followService;
 
     /**
-     * 按用户 ID 取作者主页视图。id 不存在（含已注销）时抛 NotFoundException，与关注接口同一句话、同一个 404
+     * 按用户 ID 取作者主页视图。id 不存在、已注销、或已被禁用时抛 NotFoundException——
+     * 三种情况同一句话、同一个 404，不给「存在但被禁用」的差异反馈，与关注接口口径一致
      * @param userId 作者用户 ID
      * @return 作者主页公开视图
      */
     public AuthorProfileVO getProfile(Long userId) {
-        User user = userMapper.findById(userId);
+        User user = userMapper.findVisibleById(userId);
         if (user == null) {
             throw new NotFoundException("用户不存在或已注销");
         }
