@@ -77,7 +77,9 @@ mv "$TMP" "$FINAL"
 trap - EXIT
 
 SIZE="$(du -h "$FINAL" | cut -f1 | tr -d '[:space:]')"
-say "完成：$FINAL（$SIZE，$DUMP_TABLES 张表，完成标记与 gzip 完整性均已校验）"
+# ${...} 不是风格洁癖：macOS 自带 bash 3.2 会把紧跟变量的多字节字符并进变量名，
+# set -u 下直接 unbound 崩掉（实测 $FINAL（ 就是崩点），凡变量后贴全角标点一律加花括号
+say "完成：${FINAL}（${SIZE}，${DUMP_TABLES} 张表，完成标记与 gzip 完整性均已校验）"
 
 # 滚动清理：只删本脚本自己的命名前缀，别顺手删掉同目录里别人的东西
 REMOVED="$(find "$BACKUP_DIR" -maxdepth 1 -name 'cloudlog-*.sql.gz' -mtime "+$KEEP_DAYS" -print -delete | wc -l | tr -d '[:space:]')"

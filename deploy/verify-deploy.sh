@@ -63,7 +63,8 @@ print("" if data is None else data)
 assert_contains() {
     local haystack="$1" needle="$2" label="$3"
     if [[ "$haystack" != *"$needle"* ]]; then
-        die "$label：输出里没有「$needle」。实际开头：$(printf '%.160s' "$haystack")"
+        # 变量后贴全角标点必须 ${...}：macOS bash 3.2 会把多字节字符并进变量名（set -u 即崩）
+        die "${label}：输出里没有「${needle}」。实际开头：$(printf '%.160s' "$haystack")"
     fi
 }
 
@@ -108,7 +109,7 @@ bring_up() {
         fi
         sleep 2
     done
-    die "web 容器 120 秒内没有变成 healthy（当前 $status）"
+    die "web 容器 120 秒内没有变成 healthy（当前 ${status}）"
 }
 
 send_code_and_read() {
@@ -133,7 +134,7 @@ send_code_and_read() {
         sleep 1
     done
     if [[ -z "$code" ]]; then
-        die "Redis 里没有 auth:code:$TEST_EMAIL，注册链路走不通（检查 SMTP_* 是否留空导致后端起不来）"
+        die "Redis 里没有 auth:code:${TEST_EMAIL}，注册链路走不通（检查 SMTP_* 是否留空导致后端起不来）"
     fi
     echo "  验证码已从 Redis 取到"
     VERIFY_CODE="$code"
@@ -193,7 +194,7 @@ for item in json.load(sys.stdin)["data"]:
     if [[ -z "$POST_ID" ]]; then
         die "发文失败：$body"
     fi
-    echo "  文章 id=$POST_ID，分类 id=$CATEGORY_ID"
+    echo "  文章 id=${POST_ID}，分类 id=${CATEGORY_ID}"
 }
 
 check_readable() {
