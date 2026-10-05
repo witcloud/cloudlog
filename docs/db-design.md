@@ -2,10 +2,10 @@
 
 > **用途**：面向 AI Agent 的数据库规范。本文可直接指导 schema / migration 的生成，无需再回读代码。
 > **依据**：业务语义来自 [`business-model.md`](./business-model.md) §2–§4。
-> **分工（2026-10-05 起，硬约束）**：**类型、长度、可空性、默认值、ENUM 取值、索引的字段与定义——这些一律只在 `docs/schema.sql` 里存在一份，本文不抄。** 本文只写抄不走的东西：为什么这样设计、代价、状态机与写路径的口径、明确不建什么。凡是能在本文里重述一遍 DDL 的句子，都是下一轮漂移的源头，读到这种句子就删掉它、改成指向 `schema.sql`。反向禁令照旧：**不得出现 `schema.sql` 里不存在的表或列**。
-> **范围**：表的全集以 §2.0 那张清单为唯一口径（本文不背「共几张表」这种计数——加一张就得改一处，改漏一次它就变成假话）。已落地的点赞、关注、定时发布、找回密码、邮箱修改五件事**都没有新增表或列**，这是本文那条硬约束被验证过五次的事实；新增表与新增列仍是独立裁决事项。第 11 张 `follows` 不是为某个目标态功能预留的，它随 2026-10-01 用户裁决新增的关注能力一并建立（business-model.md §2.8、§4.7），裁决前它属于 §6 的「不得创建」清单。
+> **分工（硬约束）**：**类型、长度、可空性、默认值、ENUM 取值、索引的字段与定义——这些一律只在 `docs/schema.sql` 里存在一份，本文不抄。** 本文只写抄不走的东西：为什么这样设计、代价、状态机与写路径的口径、明确不建什么。凡是能在本文里重述一遍 DDL 的句子，都是下一轮漂移的源头，读到这种句子就删掉它、改成指向 `schema.sql`。反向禁令照旧：**不得出现 `schema.sql` 里不存在的表或列**。
+> **范围**：表的全集以 §2.0 那张清单为唯一口径（本文不背「共几张表」这种计数——加一张就得改一处，改漏一次它就变成假话）。已落地的点赞、关注、定时发布、找回密码、邮箱修改五件事**都没有新增表或列**，这是本文那条硬约束被验证过五次的事实；新增表与新增列仍是独立裁决事项。第 11 张 `follows` 不是为某个目标态功能预留的，它随关注能力一并建立（business-model.md §2.8、§4.7）。
 > **数据库**：MySQL 8，单实例单库，InnoDB，`utf8mb4`。
-> **核对基准**：2026-10-05。这一轮先按代码逐列清点、再改为「不抄 DDL」的结构：删掉了 §2 各表的类型/必填/默认值三栏与 §4.1 的字段/类型两栏（合计 109 行表格内容），留下的全是说明性文字。
+> **核对基准**：2026-10-05，按 `docs/schema.sql` 与后端代码逐列、逐索引清点过。
 
 ---
 
@@ -38,7 +38,7 @@
 
 ### 1.2 命名规范
 
-- 表名：小写 `snake_case`，实体复数（`users`、`posts`、`comments`、`tags`、`categories`、`likes`）；关联表 `post_tags`；无时间戳的补充表用单数（这一档原先只有 `seo_meta`，该表已于 2026-10-03 删除，规则留着是为下一张同型表不必再议）；日志表复数（`visit_logs`、`login_logs`）；配置表 `site_settings`。**不得引入新的命名风格**。
+- 表名：小写 `snake_case`，实体复数（`users`、`posts`、`comments`、`tags`、`categories`、`likes`）；关联表 `post_tags`；无时间戳的补充表用单数（这一档目前没有住户，规则留着是为下一张同型表不必再议）；日志表复数（`visit_logs`、`login_logs`）；配置表 `site_settings`。**不得引入新的命名风格**。
 - 列名：小写 `snake_case`，单数。外键列 `引用表单数 + _id`（`author_id`、`post_id`、`user_id`、`category_id`、`tag_id`、`parent_id`）。
 - 布尔列：`is_` 前缀 + `TINYINT(1)` 语义（现存 `posts.is_top`、`banned_words.is_enabled`）。
 - 计数列：`_count` 后缀（`view_count`、`like_count`、`comment_count`）。
@@ -83,7 +83,7 @@
 ### 1.7 冗余与派生值
 
 - `posts` 的三列计数（`view_count`、`like_count`、`comment_count`）是**有意的冗余派生缓存**，服务于读多写少；其中 `like_count`、`comment_count` 可由 `likes`、`comments` 表重算，`view_count` 无可重算的真源（DB 列即展示与排序的真源）；维护规则见 §5.2，属于业务模型明确规定要冗余的三列。
-- `posts.excerpt` 是**落列存储的派生值**（2026-10-03 起，此前由作者在手填）：服务端在状态流转进 `published` / `scheduled` 且该列为空时从 `content` 生成，**已有值不重算**，所以它不是一条可重算的缓存，而是「对外可见那一刻冻结的摘录」——正文后续改动不会改写它，删列也无法从别处还原出当初那一份。列宽仍是 `TEXT`（§1.8），150 码点这个上限由展示口径定，不靠列宽兜。算法、生成时机与不重算的理由见 business-model.md §2.3、§4.2 第 6 条。
+- `posts.excerpt` 是**落列存储的派生值**，作者侧没有输入口：服务端在状态流转进 `published` / `scheduled` 且该列为空时从 `content` 生成，**已有值不重算**，所以它不是一条可重算的缓存，而是「对外可见那一刻冻结的摘录」——正文后续改动不会改写它，删列也无法从别处还原出当初那一份。列宽仍是 `TEXT`（§1.8），150 码点这个上限由展示口径定，不靠列宽兜。算法、生成时机与不重算的理由见 business-model.md §2.3、§4.2 第 6 条。
 - **除此之外不存储任何可计算值**：分类/标签的文章数在查询里用子查询即时统计（`CategoryMapper`、`TagMapper`），**不落列** `post_count` / `article_count`，也不建汇总表。
 - 不做物化视图、统计快照表、日汇总表。
 
@@ -119,7 +119,7 @@
 | 12 | `banned_words` | 评论违禁词库（一词一行） |
 | 13 | `login_logs` | 登录尝试日志（追加表） |
 
-`visit_logs` 于 2026-10-03 建成完整读写链路（§2.9，业务侧口径见 business-model.md §2.11），business-model.md §2.7 那份预留表位清单因此清空。**序号 8 是空位**：`seo_meta` 已于 2026-10-03 下线删除，详情页的 SEO 三元组改由服务端按回落链合成（business-model.md §2.10）。序号不回收——§2.x 这套编号被三份文档交叉引用，挪号等于把所有引用一起改一遍，得不偿失。`likes` 链路已启用，其读写与删除规则见 §3.1。`follows` 随关注能力一并启用，读写规则同见 §3.1。`banned_words` 是**内容数据不是站点配置**：它在「评论管理」内维护、逐行增删启停，因此不入 `site_settings`（理由见 §2.12 与 §6）。
+`visit_logs` 有完整的读写链路（§2.9，业务侧口径见 business-model.md §2.11），business-model.md §2.7 那份预留表位清单因此清空。**序号 8 是空位**：那里原本是 `seo_meta`，现已不存在，详情页的 SEO 三元组改由服务端按回落链合成（business-model.md §2.10）。序号不回收——§2.x 这套编号被三份文档交叉引用，挪号等于把所有引用一起改一遍，得不偿失。`likes` 链路已启用，其读写与删除规则见 §3.1。`follows` 随关注能力一并启用，读写规则同见 §3.1。`banned_words` 是**内容数据不是站点配置**：它在「评论管理」内维护、逐行增删启停，因此不入 `site_settings`（理由见 §2.12 与 §6）。
 
 以下每张表两列：**字段名 + 说明**。类型、长度、可空性、默认值不在本文出现——它们在 `schema.sql` 里只有一份，本文写第二份就是给自己埋漂移。全表统一 `ENGINE=InnoDB`、`utf8mb4`、带中文表注释，逐表不再重复。
 
@@ -216,9 +216,9 @@
 
 ### 2.8 （已删除）`seo_meta` — SEO 信息表
 
-本表已于 2026-10-03 下线删除。序号与本节位置保留，是为了不让 §2.9 以下的编号集体位移——那会把三份文档里的交叉引用全部改一遍。
+本表不存在，也不要重建。序号与本节位置保留，是为了不让 §2.9 以下的编号集体位移——那会把三份文档里的交叉引用全部改一遍。
 
-详情页的 SEO 三元组改由服务端现算、不入库（business-model.md §2.10）：标题 = `posts.title` 拼站点名（站点名取 `site_settings.site_name`）、描述 = `posts.excerpt`（2026-10-03 起它是正文的派生物，见 §1.7）、关键词 = 该文章标签名按「, 」拼接。后台的「待补全 SEO」清单与 `seoConfigured` 派生列同轮删除——手动录入面消失之后，「哪篇还没填 SEO」这个问题没有主语，谁都没有可执行的动作。
+详情页的 SEO 三元组改由服务端现算、不入库（business-model.md §2.10）：标题 = `posts.title` 拼站点名（站点名取 `site_settings.site_name`）、描述 = `posts.excerpt`（它是正文的派生物，见 §1.7）、关键词 = 该文章标签名按「, 」拼接。后台的「待补全 SEO」清单与 `seoConfigured` 派生列同轮删除——手动录入面消失之后，「哪篇还没填 SEO」这个问题没有主语，谁都没有可执行的动作。
 
 ### 2.9 `visit_logs` — 访问日志表
 
@@ -283,13 +283,13 @@
 | `comment_max_length` | 单条评论字数上限（0 为不限制，合法 0–5000） | `500` |
 | `comment_interval_seconds` | 同一用户评论发布间隔秒数（0 为不限制，合法 0–86400） | `60` |
 
-上表后五条键（`site_name` 起）是补记：它们早已在 `SettingsService` 读写、此前却没进这份清单，与本文「新键必须先写入本文再使用」的规则相违。2026-10-03 随 `site_url` 一并补齐。
+**上表与 `SettingsService` 的常量必须一一对应**——少一行就是本文失守（这张表出现过「后五条键早已存在却没登记」，那种状态别再来一次）。
 
 **登录锁定这两个键的读写不对称是有意的**：读取时把越界值夹回区间（库里手改的 999 不该把登录接口顶成 500，0 更不该等于「不锁」），保存时越界直接 400（保存是明确动作，静默改写会让人以为没生效）。二者都在 `SettingsService`，区间常量只此一份，后台说明文字里的范围由接口随响应下发、前端不抄第二份数字。语义见 business-model.md §2.12。
 
 表是稀疏的：缺行等同缺省值，**不要为「显式化」而预插默认行**。新键必须先写入本文再使用。
 
-**本表不承载内容数据。** 曾寄居这里的 `banned_words` 键已于 2026-10-03 删除：违禁词改为独立词库表 `banned_words`（§2.12），旧值**直接丢弃、不做迁移**——词库量小，由博主在「评论管理 → 违禁词库」重新录入或批量导入。删掉该键后 `setting_value VARCHAR(255)` 只服务开关与关于页短文案，本节不再有容量边界要守；**也不要把新的内容型数据（词库、名单、文案集合）塞回这张 KV 表**，判定口径见 §6。
+**本表不承载内容数据。** 违禁词不住在这里，它是独立词库表 `banned_words`（§2.12）——一词一行、可启停、可批量导入，这些是 KV 单值给不了的；`setting_value` 只服务开关与关于页短文案；**也不要把新的内容型数据（词库、名单、文案集合）塞回这张 KV 表**，判定口径见 §6。
 
 ### 2.11 `follows` — 用户关注关系表
 
@@ -390,7 +390,7 @@
 - **匿名有两处不同含义**：评论的匿名 = `comments.user_id IS NULL`；点赞与关注都没有匿名（`likes.user_id`、`follows.follower_id` 必填）。二者不可混用同一种空值判断。
 - **关注是单向的，不存在「互关」这一行**：`(author_id, follower_id)` 与 `(follower_id, author_id)` 是两条互不相关的记录，业务上不判定它们同时出现，也不派生任何好友语义（business-model.md §5.7 第 12 条）。
 - **`comments.hit_word` 不是关系**：它记的是机审命中当刻的词面字符串，与 `banned_words` 无 id 关联、无级联、无一致性要求。词库后来删词、改词、停用，存量评论的命中词照旧显示——这是**有意的**：审核台要能回答「当初为什么被拦下」，而不是「现在还拦不拦」。
-- **SEO 不入库**：详情页那三个值是响应时按回落链现算的（标题拼站点名、描述取摘要、关键词取标签名，见 business-model.md §2.10），库里唯一相关的列是 `posts.excerpt`，而它本身也是正文的派生物（§1.7）。2026-10-03 之前它独立成 1:1 的 `seo_meta` 补充表，那张表已删除（§2.8）。
+- **SEO 不入库**：详情页那三个值是响应时按回落链现算的（标题拼站点名、描述取摘要、关键词取标签名，见 business-model.md §2.10），库里唯一相关的列是 `posts.excerpt`，而它本身也是正文的派生物（§1.7）。库里没有 SEO 表（§2.8 那个位置是空位）。
 - **`content` 里的图片不是关系**：正文内联图片是 Markdown 文本里的绝对 URL，**不与 `posts` 建立任何引用关系**，没有图片附件表（见 §6）。
 
 ---
@@ -425,7 +425,7 @@
 | `likes` | `idx_user` | 「点赞过的文章」按用户取回（`findLikedByUser` 以 `l.user_id` 为谓词、按 `l.created_at` 倒序）——`uk_post_user` 的最左列是 `post_id`，反方向只能靠它 |
 | `visit_logs` | 主键（`id`） | 行标识 |
 | `visit_logs` | `idx_post_time` | 明细的「按文章筛选」走最左列；后台分析里按篇查访问 |
-| `visit_logs` | `idx_created_at` | **一切时间范围扫描**：概览、趋势、三个 Top 榜、明细与保留期删除的谓词都是 `created_at` 的一个区间。`idx_post_time` 的最左列是 `post_id`，救不了不带文章的窗口查询，2026-10-03 随访问日志启用一并建 |
+| `visit_logs` | `idx_created_at` | **一切时间范围扫描**：概览、趋势、三个 Top 榜、明细与保留期删除的谓词都是 `created_at` 的一个区间。`idx_post_time` 的最左列是 `post_id`，救不了不带文章的窗口查询 |
 | `site_settings` | 主键（`setting_key`） | 按键读配置 |
 | `follows` | 主键（`id`） | 行标识 |
 | `follows` | `uk_author_follower` | **防重复关注的唯一硬保证**；`INSERT IGNORE` 靠它成为幂等成功；`DELETE` 按该对精确定位；`COUNT(*)` 按 `author_id` 前缀走索引 |
@@ -446,9 +446,9 @@
 
 - 不给 `status`、`is_top`、`role` 这类低基数列**单独**建索引（值域极小，选择性不足，只会增加写放大）。`status` 只出现在联合索引的最左列。
 - 不给 `banned_words.is_enabled`、`banned_words.action` 建索引：机审要的是「全部启用词」，本就是一次小表全取再进进程内缓存（§2.12），索引救不了它；后台按 `word` 的模糊搜索是 `LIKE '%kw%'`，前缀通配同样走不上索引。
-- `posts.title` + `posts.content` 的全文索引**已建**（2026-10-03 由用户裁决移出本条禁令，见 §4.1 与 §4.4）：`FULLTEXT KEY ft_title_content (title, content) WITH PARSER ngram`。它只是 InnoDB 内建的倒排索引，不是外部搜索引擎，因此不触碰 business-model.md §5.7 第 5 条那条禁令。搜索侧的分支写在 `PostMapper.xml` 的 `findAllBrief`，分岔条件收敛在 `FulltextKeywordUtils.isIndexable`：只把**不含 ASCII 字母与符号、满 2 字**的关键词交给 `MATCH…AGAINST(… IN BOOLEAN MODE)`，其余退回 `LIKE`。原因有二：ngram 词元固定两个字符，单字进不了索引；更关键的是 ngram 分词会套用停用词表（`innodb_ft_enable_stopword` 默认开），默认表里的单字母 `a`/`i` 在分词时被当成分隔符——"Mac" 切不出词元、根本进不了倒排索引，含英文/符号（"C++"）或恰为双字符停用词（of/to）的关键词走 MATCH 必然 0 命中，且无法在查询侧绕开。LIKE 是子串语义，命中范围恒为 MATCH 的超集；博客量级下 `%kw%` 扫描可接受，这个取舍是 2026-10-04 验证 MySQL 8.4 实测行为后定的。
+- `posts.title` + `posts.content` 的全文索引**不在本条禁令之内**（它是本站唯一一条特例索引，裁决与代价见 §4.1/§4.4）：`FULLTEXT KEY ft_title_content (title, content) WITH PARSER ngram`。它只是 InnoDB 内建的倒排索引，不是外部搜索引擎，因此不触碰 business-model.md §5.7 第 5 条那条禁令。搜索侧的分支写在 `PostMapper.xml` 的 `findAllBrief`，分岔条件收敛在 `FulltextKeywordUtils.isIndexable`：只把**不含 ASCII 字母与符号、满 2 字**的关键词交给 `MATCH…AGAINST(… IN BOOLEAN MODE)`，其余退回 `LIKE`。原因有二：ngram 词元固定两个字符，单字进不了索引；更关键的是 ngram 分词会套用停用词表（`innodb_ft_enable_stopword` 默认开），默认表里的单字母 `a`/`i` 在分词时被当成分隔符——"Mac" 切不出词元、根本进不了倒排索引，含英文/符号（"C++"）或恰为双字符停用词（of/to）的关键词走 MATCH 必然 0 命中，且无法在查询侧绕开。LIKE 是子串语义，命中范围恒为 MATCH 的超集；博客量级下 `%kw%` 扫描可接受，这一取舍是按 MySQL 8.4 的实测行为定的，不是照文档推的。
 - 不给 `excerpt`、`bio`、`description` 建全文索引：它们要么是正文的摘录、要么是短文案，没有独立的检索需求。
-- 不给 `visit_logs.ip`、`user_agent` 建索引。2026-10-03 启用后这两列确实进了检索条件（明细按地址前缀 `LIKE '112.10.%'`、按 UA 关键词 `LIKE '%kw%'`），但仍不建：**UA 那侧前缀通配本来就上不了 B-tree 索引**；地址那侧理论上 `LIKE '前缀%'` 能用，代价是每次访问多一列写放大，而这类查询总是先被 `idx_created_at` 的时间范围收窄到几百到几千行，扫这点行的成本远低于让索引常驻。要加，先拿出慢查询证据（同 §4.4 的口径）。同一判断适用于 `login_logs.ip` 与 `login_logs.user_agent`（§2.13）：登录尝试的量级比访问小一到两个数量级，更没有为地址前缀单开索引的理由。
+- 不给 `visit_logs.ip`、`user_agent` 建索引。这两列确实进了检索条件（明细按地址前缀 `LIKE '112.10.%'`、按 UA 关键词 `LIKE '%kw%'`），但仍不建：**UA 那侧前缀通配本来就上不了 B-tree 索引**；地址那侧理论上 `LIKE '前缀%'` 能用，代价是每次访问多一列写放大，而这类查询总是先被 `idx_created_at` 的时间范围收窄到几百到几千行，扫这点行的成本远低于让索引常驻。要加，先拿出慢查询证据（同 §4.4 的口径）。同一判断适用于 `login_logs.ip` 与 `login_logs.user_agent`（§2.13）：登录尝试的量级比访问小一到两个数量级，更没有为地址前缀单开索引的理由。
 - 不为「以后可能按 X 查」预留索引。
 
 ### 4.4 已知的索引代价（如实记录，不要自作优化）
@@ -456,7 +456,7 @@
 - 定时发布扫描谓词形如 `status='scheduled' AND published_at <= NOW()`，可利用 `idx_status_time`；不为此加生成列。`published_at` 是 `TIMESTAMP`，`NOW()` 与它同靠**会话时区**这一个基（§1），会话由连接串显式钉成 `+08:00`，所以谓词不跟着数据库主机漂；换成写死的 `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')` 反而会打破这个对称。
 - `post_tags` 只有 `(post_id, tag_id)` 联合主键，**无 `tag_id` 方向的索引**（已核对 `schema.sql`）。按标签筛选、合并标签（按 `tag_id` 改写关联行）、删标签前清关联都要按 `tag_id` 查，走不到主键最左列。当前量级下可接受，**不新增索引**；要加先给出慢查询证据。
 - 后台草稿列表按 `updated_at` 排序、前台最热列表按**加权衰减表达式**排序（`business-model.md` §3.2「排序参数」），二者都无专属索引。热榜的排序键是每行现算的表达式，**任何索引都命中不了，必然 filesort**；`latest` 与 `recommended` 两个分支以 `is_top DESC, top_order DESC` 打头，而 `idx_status_time` 的最左列是 `status`、第二列是 `published_at`，接不住这两列，所以置顶权重排序同样走 filesort。当前量级下可接受，新增索引前先给出慢查询证据。
-- 个人主页与草稿箱的列表按 `updated_at` 倒序（`findMine` / `findDrafts`），「点赞过的文章」按 `likes.created_at` 倒序（`findLikedByUser`），三条都只以作者/用户一列收敛、没有时刻列的专属索引。**三条的排序键末位各补了一枚 `id DESC` 全序尾键**（2026-10-05；缺它时同一秒并列的行会在 `LIMIT/OFFSET` 的翻页边界上重复或漏取，与 §2.9 明细那条、`findLatestPublishedForFeed` 的注释同一条口径）。排序仍走 filesort，量级下可接受。
+- 个人主页与草稿箱的列表按 `updated_at` 倒序（`findMine` / `findDrafts`），「点赞过的文章」按 `likes.created_at` 倒序（`findLikedByUser`），三条都只以作者/用户一列收敛、没有时刻列的专属索引。**三条的排序键末位都带着 `id DESC` 这枚全序尾键**——缺它时同一秒并列的行会在 `LIMIT/OFFSET` 的翻页边界上重复或漏取，与 §2.9 明细那条、`findLatestPublishedForFeed` 的注释同一条口径）。排序仍走 filesort，量级下可接受。
 - `ft_title_content` 覆盖 `content` 这张 LONGTEXT 列：每次保存文章都要重算该行词元并写进倒排索引与 InnoDB 的 FTS 辅助表，这是**本索引带来的写放大**（换取搜索不再全表扫 LONGTEXT）。索引就在 `docs/schema.sql` 的 `posts` 建表语句里，随全新安装一并建立。库中缺这条索引时，满 2 字的 `MATCH…AGAINST` 直接报 1191，表现为搜索页 500——按口径这属于「库没跟上 `docs/schema.sql`」，清库重建解决，不补增量脚本。
 - 访问日志的三条后台查询各有明确代价，都是**接受了换来的东西**（口径见 §2.9）：① 概览、趋势、Top 榜都要按时间窗口聚合，走 `idx_created_at` 拿到区间行之后再分组，窗口上限 90 天就是这个分组的成本闸门；② Top IP 那条不带 `LIMIT`，返回窗口内的全部地址分组——先脱敏合并才能截前 10（§2.9），代价是行数由访问者数决定而不是由榜单长度决定；③ 明细按地址前缀与 UA 关键词的两个 `LIKE` 都不走索引，靠时间范围先收窄。行数由「180 天保留期 + 每人每小时最多一篇一行」共同兜住，本量级下都不必再动索引。
 - 每次窗口首访多一行 `visit_logs` 的 INSERT，这是访问日志启用带来的写放大：详情页原先只有 `view_count` 一次自增。写在 `@Async` 线程上做掉了一次往返，异步队列就是线程池——不引消息中间件（business-model.md §5.7 第 5 条）。
@@ -482,10 +482,10 @@
 
 | 字段 | 维护规则 | 说明 |
 |---|---|---|
-| `view_count` | **只对 `published` 文章的详情访问 +1**，且同一访问者在 1 小时窗口内只计一次（去重键见下方 Redis 键位）；作者预览草稿/定时文章一律不计 | DB 列是计数的**唯一存储**。Redis 侧那枚只写不读的 `article:view_count:` 计数器已于 2026-10-03 删除（business-model.md §6 的这条技术债已还），Redis 只剩去重判定一件事。不要引入回写列或计数器表；将来若要批量回写，正确动机是削减写放大，而非修复不一致 |
+| `view_count` | **只对 `published` 文章的详情访问 +1**，且同一访问者在 1 小时窗口内只计一次（去重键见下方 Redis 键位）；作者预览草稿/定时文章一律不计 | DB 列是计数的**唯一存储**。**Redis 侧没有计数器**，只有去重判定这一件事；不要因为「Redis 里大概也存着一份计数」去找它，更不要加回来。不要引入回写列或计数器表；将来若要批量回写，正确动机是削减写放大，而非修复不一致 |
 | `like_count` | 每次点赞/取消后按 `likes` 表**绝对重算**：`like_count = COUNT(likes WHERE post_id = posts.id)` | 不用 `+1/-1`：绝对重算天然幂等、重试不漂移、顺带修正历史脏数据。存量盲增可能已抬高该值，重算即修正 |
 | `comment_count` | 仅 `approved` 计入；跨越 `approved` 边界时增减；扣减必须下限截断（等价 `GREATEST(comment_count - n, 0)`）；删评论按「自身 + 其回复」中已通过条数批量扣 | **禁止出现负数计数** |
-| 三列共同点 | 是派生缓存，**不是真源**。`view_count` 没有可重算的真源：访问行为自 2026-10-03 起确实入库（`visit_logs`，§2.9），但那张表不是它的真源——超保留期的行已删、异步写失败的行根本没落库，拿它回算只会把数压小，所以 **DB 列即展示与排序的真源**（business-model.md §2.11、§5.6）；`like_count`、`comment_count` 才分别以 `likes` 表、`comments` 表重算 | 不要为「对账」新增校正日志表，也不要用 `visit_logs` 反推 `view_count` |
+| 三列共同点 | 是派生缓存，**不是真源**。`view_count` 没有可重算的真源：访问行为确实入库（`visit_logs`，§2.9），但那张表不是它的真源——超保留期的行已删、异步写失败的行根本没落库，拿它回算只会把数压小，所以 **DB 列即展示与排序的真源**（business-model.md §2.11、§5.6）；`like_count`、`comment_count` 才分别以 `likes` 表、`comments` 表重算 | 不要为「对账」新增校正日志表，也不要用 `visit_logs` 反推 `view_count` |
 
 **阅读链路上的 Redis 键位**（前缀统一为 `article:`，与 §5.4 的 `auth:` 键位并列；库里无对应表，见 §6）：
 
@@ -504,12 +504,12 @@
 
 - **JWT subject 是邮箱，不是用户 id**。因此 `users.email` 的 UNIQUE 兼具冲突判据作用，且修改邮箱后旧 token 的 subject 再也查不到用户 → **改邮箱必须强制重新登录**。不改 subject（会让全站现存 token 一次性失效）。
 - 评论的 `user_id` **只由服务端从安全上下文回填**，请求体携带的值一律覆盖；查不到对应用户时拒绝写入。生成接口时不要留「客户端可传 user_id」的口子。
-- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`。**下面登记的是键名与用途——键名是对外契约（前端、运维脚本、排查时都在按它 grep），本文持有；时长、次数、阈值这类数值一律不写，它们以代码常量与 §2.10 那两键为准，抄一遍就多一处会过期的地方。**键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**2026-10-03 增量：所有含 `{email}` 的键统一用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §3.2「验证码与注册的防刷」）：
+- 认证面**只在 Redis 中，库里无对应表**（见 §6），前缀统一为 `auth:`。**下面登记的是键名与用途——键名是对外契约（前端、运维脚本、排查时都在按它 grep），本文持有；时长、次数、阈值这类数值一律不写，它们以代码常量与 §2.10 那两键为准，抄一遍就多一处会过期的地方。**键位如下（`purpose` 取 `registration` / `email-change` / `password-reset`；**所有含 `{email}` 的键一律用 `trim + 转小写` 的归一化邮箱分键**——库表是 ci 排序规则、查库不区分大小写，键不归一就等于每个大小写变体各领一套额度，具体见 business-model.md §3.2「验证码与注册的防刷」）：
   - 码值键 `auth:code:{email}`（注册）、`auth:code-change:{email}`（改邮箱）、`auth:code-reset:{email}`（重置口令）：三用途三名分列即契约——注册码、改邮箱码、重置口令码互不通用。一次性消费、命中即销毁，存活时长看 `VerificationCodeService` 的常量。
   - 发码频控键 `auth:code-limit:{purpose}:{email}`（同邮箱同用途的重发间隔）与 `auth:code-daily:{purpose}:{email}`（该邮箱当日额度）；另有两层兜底日额度 `auth:code-ip-daily:{客户端地址}` 与 `auth:code-global-daily`，堵「握着邮箱列表来发码」这条邮件轰炸口子——邮箱维度的额度对这种打法无效。窗口与次数见 `VerificationCodeService`，口径见 business-model.md §3.2。
   - 防穷举计数键 `auth:code-try:{purpose}:{email}`：按用途分键（注册码错满不牵连改邮箱码），与码值键同寿、错满把码一起作废、校验通过即清零。次数见代码。
   - 登录防爆破计数**两层**键。来源地址层 `auth:login-fail:{email}:{客户端地址}`：`INCR` 计数，首错与计满那一次都把 TTL 重新设为 `login_lock_minutes`，计满 `login_max_failures` 即锁（两个键的默认值与合法区间只在 §2.10 记一处），**两层计数任一到阈都算锁**（来源地址层挡单点穷举，邮箱层挡换 IP 的分布式穷举），登录成功**两层一起删**——只清来源地址那层，换 IP 攒下的邮箱计数会一直压着下一个正常登录。邮箱层 `auth:login-fail-global:{email}`：**不带地址**，堵「轮换来源地址就能对同一个邮箱无限试口令」这条绕法，阈值 = 地址层配置值 × 5 但不低于一个地板值（`AuthService` 里的换算与地板常量各一处；乘而不直接用配置值，是因为管理员把阈值调到 3 时，纯乘 5 会得到 15 这种过紧的全局额度，把网吧、公司出口这类共享地址下的正常用户累加锁死）。两层都是邮箱维度分键（`trim + 转小写`，同上），地址口径与阅读去重同源（§5.2）。语义见 business-model.md §2.12
-  - token 失效水位键 `auth:token-epoch:{email}`：值为置位时刻的秒级时间戳，TTL 与 token 有效期同值（那之前签发的 token 早已自然过期，水位不必比 token 活得久）。`iat` 早于水位的 token 按未登录处理，见 §5.1。**2026-10-03 增量**：置位点从「口令的两处写入」扩为三处——新增登出 `POST /auth/logout` 同样推水位（作废该账号全部在存 token）。
+  - token 失效水位键 `auth:token-epoch:{email}`：值为置位时刻的秒级时间戳，TTL 与 token 有效期同值（那之前签发的 token 早已自然过期，水位不必比 token 活得久）。`iat` 早于水位的 token 按未登录处理，见 §5.1。置位点共三处：找回密码、修改口令、登出 `POST /auth/logout`（后者作废该账号全部在存 token）。
   - 上传日额度键 `upload:daily:{userId}`：按用户计当日上传次数，计满后 `/upload/*` 全部端点拒绝转存。次数与窗口见代码常量。
 
 ### 5.5 URL 存储的既有事实（重要）
@@ -566,7 +566,7 @@
 | `post_revisions` / `draft_versions` / `autosave` | 编辑器 30s 自动保存是**原地 update 同一行**，不保留历史版本 |
 | `post_images`（正文图片关联表） | 图片是 Markdown 文本内的 URL，业务不需要按图片反查文章 |
 | `likes` 的 `target_type` 扩展 / `article_likes` 之外的点赞表 | 点赞目标只有文章；`business-model.md` C4 明确不引入多目标点赞抽象 |
-| `favorites` / `bookmarks` / `subscriptions` / `notifications` / `messages` | 业务无收藏、订阅、站内信、通知。关注不在此列——它已于 2026-10-01 按用户裁决建为 `follows`（§2.11），且只做计数与按钮状态，不派生通知表 |
+| `favorites` / `bookmarks` / `subscriptions` / `notifications` / `messages` | 业务无收藏、订阅、站内信、通知。关注不在此列——它已经是 `follows` 表（§2.11），且只做计数与按钮状态，不派生通知表 |
 | `comment_likes` / `reactions` | 评论无点赞/表情回应 |
 | `page_views_daily` / `stats_daily` / `dashboard_metrics`（统计汇总表） | Dashboard 聚合直接对 `posts`/`users`/`comments` 即时聚合；不做预聚合 |
 | `categories` 的 `parent_id` / `path` / `sort_order` / `slug`；独立 `category` 树表 | 分类扁平一层，无层级、无排序、无别名 |
@@ -580,7 +580,7 @@
 | `tenants` / `blogs`（多站点）/ `sites` | 单博主单站点，无多租户维度，任何表都不加 `tenant_id` |
 | `schema_migrations` / `flyway_schema_history` / `liquibase_changelog` | 全新库由 `schema.sql` 初始化（本机走 `mysql ... < docs/schema.sql`，容器化时同一份文件挂进 MySQL 的 initdb 目录，只在数据目录为空的首次起跑执行——见 business-model.md §3.3「自托管部署」）；引入迁移框架是独立工程决策，不在数据库设计内自行添加 |
 | 审计表（`audit_logs` / `operation_logs`） | 业务未要求操作审计；不要为「后台更安全」自行加审计落库 |
-| SEO 元数据表（任何形态），或把 SEO 三列并进 `posts` | 详情页那三个值是响应时按回落链现算的，落库既没有真源也没有编辑面。原 `seo_meta` 1:1 补充表已于 2026-10-03 删除（§2.8），两个方向都不再建 |
+| SEO 元数据表（任何形态），或把 SEO 三列并进 `posts` | 详情页那三个值是响应时按回落链现算的，落库既没有真源也没有编辑面。§2.8 那个空位就是它曾经的位置，两个方向都不再建 |
 | `word_hits` / 违禁词命中日志 / 命中计数列 | 命中词就是 `comments.hit_word` 一列值拷贝，一条评论只记**首个**命中词；不做命中统计、不做按词反查评论、不给 `banned_words` 加 `hit_count` |
 | `banned_words` 的 `category` / `level` / `sort_order` / 分组表 | 词库只有词面、动作、启停三件事；分级已经由 `action` 两值承担，不再引入第二套分级维度 |
 

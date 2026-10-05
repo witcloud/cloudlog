@@ -265,7 +265,7 @@ KV 结构。**键名、默认值、合法区间只在 `db-design.md` §2.10 登�
 | 邮箱修改 | 校验当前口令 + 新邮箱验证码 + 唯一性后改绑 | 已实现（`PUT /user/email` + `POST /user/email/code`；成功后前端强制登出并跳登录页——JWT subject 是邮箱，旧 token 下一次请求即失效。落地即连带强制重新登录的约束已满足） |
 | 图片对象回收 | 更换头像/删除文章后清理旧对象 | 已实现（自 §6「已排除的技术债」清偿转入，残留范围见 §6）。删除能力在 `ImageReclaimService`，覆盖两条链路：① `UserService.updateAvatar` 换下的旧头像；② `ArticleService.cascadeDelete`（`deletePost`/`deleteDraft`/`clearDrafts` 三条路径共用那一条级联）删掉的这篇文章的封面 + 正文 `![alt](url)` 里引用的图。四条口径：**提交之后才删**——回收排在事务的提交点之后（回滚了却已把对象删掉是唯一不可接受的错法），走 Spring 自带 `@Async`，与 §2.11 同一条约束「地址必须在请求线程上取好再传进去」；**宁可漏删、不可误删**——只有以 `minio.endpoint` + 桶名 + `/` 打头的地址才归本桶管，空值、第三方图床（存量头像里的 dicebear、正文里的外链图）、前端随发布的相对路径 `default-avatar.svg` 一律出局；**失败只记 error**——与 `visit_logs` 写失败同一条口径（§2.11），不影响主流程、不重试；**不做扫描**——全桶扫描与孤儿对象巡检仍在 §6 的「不做」清单里 |
 | 运维面收敛 | 生产环境收紧监控端点与接口文档 | 已实现（`SecurityConfig` 只放行 `/actuator/health`，其余 actuator 端点落到「其余一律要求登录」；Swagger 的 `/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` 三条放行规则按 `springdoc.api-docs.enabled` 条件装配。默认配置（dev）保持文档开放便于联调；`application-prod.yml` 关掉 `springdoc.api-docs.enabled` 与 `springdoc.swagger-ui.enabled`，并把 `management.endpoints.web.exposure.include` 收窄为 `health`。**注意**：未加 profile 时走默认配置，收紧只在以 `--spring.profiles.active=prod` 启动时生效） |
-| 自托管部署 | 容器化一键起 | 已实现（`cloudlog_api/Dockerfile` 两阶段：`maven:3.9-eclipse-temurin-21` 打包 → `eclipse-temurin:21-jre-alpine` 非 root 运行，启动命令固定带 `--spring.profiles.active=prod`，`.dockerignore` 把不入库的 `application.yml` 挡在构建上下文之外，所以镜像里没有任何凭据；`cloudlog_web/Dockerfile` 两阶段：`node:22-alpine` 构建 → `nginx:1.28-alpine` 托管 `dist`，`cloudlog_web/nginx.conf` 落地那三条**域名根**精确映射（`location = /robots.txt` 等，口径见 §3.2 与 README）+ SPA `try_files` 回退 + `/api/v1` 反代；根目录 `docker-compose.yml` 一键起 MySQL + Redis + 后端 + 前端（四个服务与镜像 tag 看那一个文件，本文不抄），健康检查齐备、`depends_on` 按 healthy 排队、`docs/schema.sql` 挂进 MySQL 的 initdb 目录，凭据只来自仓库根 `.env`（入库的只有 `.env.example` 模板）。**两处与 README 原文有差别**：① compose 拓扑里后端不是 `127.0.0.1:8080` 而是网络内的服务名 `api`，且 8080 不对外发布——nginx 是唯一入口、以覆盖方式写 `X-Forwarded-For`，因此容器档里 `app.security.trust-forwarded-for` 默认 true（前提被破坏时须改回 false，见 §5.5）；② 运行期配置 = 挂载的 `deploy/api/application-prod.yml` + `.env` 注入的环境变量，**不是全部走环境变量**：`pagehelper.params=count=countSql` 这类标量值经环境变量传入会绑不进 Map、启动即 `BindException`（本机以 Spring Boot 3.5.14 的 Binder 实测）。挂载文件与 jar 内同名文件是「同名叠加、只补不覆」，prod 的三项收紧照旧生效。JVM 时区在镜像里钉 `Asia/Shanghai`——评论频控、日志保留、SEO 产物三处仍按 JVM 默认时区取「现在」（§6 未决项），容器默认起在 UTC 会静默偏 8 小时。**MinIO 那一格受外部供给影响**：2026-09 起 MinIO 停发免费 Docker 镜像（实测 Docker Hub 的 `minio/minio`、`minio/mc` 已 404，`quay.io/minio/minio` 匿名拉取 401），故镜像名交 `.env` 的 `MINIO_IMAGE` 填、服务排在 `--profile images` 之后，桶的匿名只读策略仍是手工动作（§5.6 的匿名只读裁决不变）。单实例假设不变（§5.7 第 5 条）：不上 K8s、不做镜像仓库推送、不做多副本。验证：`deploy/verify-deploy.sh` 覆盖「注册 → 发文 → 详情可读 → 三份产物在域名根可达 → 清理容器与数据卷」。2026-10-04 已在本机 Docker（Docker Desktop 29.8.1）实机走查：compose 栈 MySQL/Redis/api/web 四容器 healthy，三份 SEO 产物经 nginx 在域名根可达、`/api/v1` 反代与 SPA 深链回退实测 200，JVM 时区实测钉在 Asia/Shanghai；脚本自身的全流程复跑未纳入当次记录，换干净机器跑通一次即为最终验收） |
+| 自托管部署 | 容器化一键起 | 已实现（`cloudlog_api/Dockerfile` 两阶段：`maven:3.9-eclipse-temurin-21` 打包 → `eclipse-temurin:21-jre-alpine` 非 root 运行，启动命令固定带 `--spring.profiles.active=prod`，`.dockerignore` 把不入库的 `application.yml` 挡在构建上下文之外，所以镜像里没有任何凭据；`cloudlog_web/Dockerfile` 两阶段：`node:22-alpine` 构建 → `nginx:1.28-alpine` 托管 `dist`，`cloudlog_web/nginx.conf` 落地那三条**域名根**精确映射（`location = /robots.txt` 等，口径见 §3.2 与 README）+ SPA `try_files` 回退 + `/api/v1` 反代；根目录 `docker-compose.yml` 一键起 MySQL + Redis + 后端 + 前端（四个服务与镜像 tag 看那一个文件，本文不抄），健康检查齐备、`depends_on` 按 healthy 排队、`docs/schema.sql` 挂进 MySQL 的 initdb 目录，凭据只来自仓库根 `.env`（入库的只有 `.env.example` 模板）。**两处与 README 原文有差别**：① compose 拓扑里后端不是 `127.0.0.1:8080` 而是网络内的服务名 `api`，且 8080 不对外发布——nginx 是唯一入口、以覆盖方式写 `X-Forwarded-For`，因此容器档里 `app.security.trust-forwarded-for` 默认 true（前提被破坏时须改回 false，见 §5.5）；② 运行期配置 = 挂载的 `deploy/api/application-prod.yml` + `.env` 注入的环境变量，**不是全部走环境变量**：`pagehelper.params=count=countSql` 这类标量值经环境变量传入会绑不进 Map、启动即 `BindException`（本机以 Spring Boot 3.5.14 的 Binder 实测）。挂载文件与 jar 内同名文件是「同名叠加、只补不覆」，prod 的三项收紧照旧生效。JVM 时区在镜像里钉 `Asia/Shanghai`——评论频控、日志保留、SEO 产物三处仍按 JVM 默认时区取「现在」（§6 未决项），容器默认起在 UTC 会静默偏 8 小时。**MinIO 那一格受外部供给影响**：2026-09 起 MinIO 停发免费 Docker 镜像（实测 Docker Hub 的 `minio/minio`、`minio/mc` 已 404，`quay.io/minio/minio` 匿名拉取 401），故镜像名交 `.env` 的 `MINIO_IMAGE` 填、服务排在 `--profile images` 之后，桶的匿名只读策略仍是手工动作（§5.6 的匿名只读裁决不变）。单实例假设不变（§5.7 第 5 条）：不上 K8s、不做镜像仓库推送、不做多副本。验证：`deploy/verify-deploy.sh` 覆盖「注册 → 发文 → 详情可读 → 三份产物在域名根可达 → 清理容器与数据卷」。本机 Docker（Docker Desktop 29.8.1）实机走查过：compose 栈 MySQL/Redis/api/web 四容器 healthy，三份 SEO 产物经 nginx 在域名根可达、`/api/v1` 反代与 SPA 深链回退实测 200，JVM 时区实测钉在 Asia/Shanghai；脚本自身的全流程复跑未纳入当次记录，换干净机器跑通一次即为最终验收） |
 | 自动化测试 | 关键业务规则有回归保护 | 部分实现（前端测试设施已建立，依赖放行见 §5.7 第 4 条例外）：`cloudlog_web/vitest.config.ts` + `npm run test`，用例只测纯逻辑与代表组件——`utils/seo.ts` 的 `toIso8601`（套件把运行时时区钉成 UTC，本机 +08 上「显式补 +08:00」与「按本地裸解析」本是同一瞬间，钉住后去掉锚定即红）与 `canonicalUrl`（剥掉查询参数）；`stores/article.ts` 的状态流转（定时文章从 `publishedAt` 恢复计划时刻、标签归一成 id、详情取数把 404 与 5xx 分别落成 `detailFailed` 的假与真）；`views/profile/ProfileFollowList.vue` 的「取消关注」（接口未答话前不摘行、接口失败既不报成功也不 `emit('changed')`、只有确认后才出现第二次取数）——§5.3 第 5 条「以服务端返回值为准、不做乐观更新」由此有了回归保护。最小面是刻意的：不发真实请求、不追覆盖率、没有端到端（Playwright / Cypress 未放行）。测试文件放 `src/**/__tests__/`，`tsconfig.app.json` 的 exclude 本就覆盖该目录，所以不进 `vue-tsc --build` 也不进构建产物，代价是测试文件自身不被类型检查。**CI 口径**：前端作业先 `npm run test` 再 `npm run build`；后端作业的服务容器起的是空实例，测试前导入 `docs/schema.sql` 与 `docs/data.sql`——后者在这里承担 fixture 角色：**只导 `schema.sql` 不导 `data.sql`，`CommentGuardQueryTest`、`CommentListQueryTest`、`PostListQueryTest`、`SeoPublicQueryTest`、`VisitLogMapperTest`、`TokenRevocationFilterTest` 这六个类会红**（它们的断言读的是种子数据里的具体行），两步都导才全绿。本机跑这批用例的前置条件见 §**用例总数不登记进本文**——加一个用例就过期一次，而它不承载任何决策：要当下值就跑 `npm run test` / `mvn -o test`，或看 CI 日志 |
 | 前端依赖治理 | 声明与实际一致 | 已实现（核对口径：**声明 = 源码实际引用 ∪ 构建期必需**。`nprogress` 接进路由守卫做导航进度条（语义见 ui-design §4.7），声明与引用一致；`@vueuse/core` 全仓零引用，**因此不新增声明**，不把它变成幽灵依赖；`sass` 在源码中零 import，但 27 处 `<style lang="scss">` 需要它在构建期存在，保留；其余依赖逐个核对过引用，全部有来源） |
 
@@ -494,7 +494,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 
 暂无。
 
-（曾挂在这里的「禁用账号在公开面上怎么呈现」已于 2026-10-05 定口径并落进代码：**主语级撤下、成员行留痕**——`/users/{id}/…` 四个读端点走 `UserMapper.findVisibleById`（谓词 `AND status = 1`），禁用者的主页与两栏名单都是同一个 404；他人粉丝名单里的成员行不过滤，`countFollowers` 也不过滤，计数与行数因此始终对得上；关注与取关两条写路径不动，取关永远可行。全文见 §2.2 的 `status` 行与 `db-design.md` §5.1。日后要再挪，先回本节登记裁决。）
+（曾挂在这里的「禁用账号在公开面上怎么呈现」口径已定并落进代码：**主语级撤下、成员行留痕**——`/users/{id}/…` 四个读端点走 `UserMapper.findVisibleById`（谓词 `AND status = 1`），禁用者的主页与两栏名单都是同一个 404；他人粉丝名单里的成员行不过滤，`countFollowers` 也不过滤，计数与行数因此始终对得上；关注与取关两条写路径不动，取关永远可行。全文见 §2.2 的 `status` 行与 `db-design.md` §5.1。日后要再挪，先回本节登记裁决。）
 
 既往裁决的修订记录见附录 B，现行口径以正文对应小节为准。
 
@@ -502,7 +502,7 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 
 ## 附录 · 旧编号对照
 
-`db-design.md`、`ui-design.md`、`variables.css` 中仍有指向 2026-09-28 稿（Part A/B/C 结构）的锚点引用。旧结构已作废，**下列引用按此读取，不必回改**；本文件自身的新编号是唯一有效编号。
+`db-design.md`、`ui-design.md`、`variables.css` 中仍有指向旧稿（Part A/B/C 结构）的锚点引用。旧结构已作废，**下列引用按此读取，不必回改**；本文件自身的新编号是唯一有效编号。
 
 | 旧锚点 | 旧含义 | 本稿位置 |
 |---|---|---|
@@ -515,11 +515,11 @@ offline → published   重新上线：恢复可见，published_at 沿用首发�
 | B3.1 | 点赞幂等与「禁止乐观更新」 | §4.5（流程）、§3.1（现状缺口）；仅指点赞幂等与禁止乐观更新，不适用于通用表单防重 |
 | B3.3 | 邮箱修改及其强制重新登录后果 | §3.3（P2）、§2.2（email 为 JWT subject） |
 | C4 | 明确不做清单 | §6（范围）+ §5.7（禁止事项） |
-| C5 · D8 | 定时文章被提前发布时 `published_at` 的未决语义 | §4.2 第 5 条（2026-10-04 已裁决，不再是待决项） |
+| C5 · D8 | 定时文章被提前发布时 `published_at` 的未决语义 | §4.2 第 5 条（已裁决，不再是待决项） |
 | Part C · R9 · §0 | 旧稿内部引用（指向旧 ui 分节） | 随旧稿作废，无对应内容，不必映射 |
 | 列表页缓存语义（无编号） | 旧稿对列表页缓存的描述 | 新稿无此条；前端列表缓存属实现细节，由 ui-design 自行描述 |
 
-> 旧稿中与本稿结论相反的两条，以本稿为准：① 旧稿 A2/A6.3 把 `visit_logs`、`seo_meta`、`likes` 一并描述为在用的实体——三者现在都已接通（§3.1、§4.5、§2.10、§2.11），但在本稿 2026-09-29 核对基准与 2026-10-03 之前，`seo_meta` 与 `visit_logs` 确实只是预留表位；② 旧稿 A6.3 的「写 visit_logs：ip + UA」这一步在代码中曾长期不存在，2026-10-03 按 §2.11 建成，口径以本稿为准而非旧稿。
+> 旧稿中与本稿结论相反的两条，以本稿为准：① 旧稿 A2/A6.3 把 `visit_logs`、`seo_meta`、`likes` 一并描述为在用的实体——三者现在都已接通（§3.1、§4.5、§2.10、§2.11），但在旧稿写作时点，`seo_meta` 与 `visit_logs` 确实只是预留表位；② 旧稿 A6.3 的「写 visit_logs：ip + UA」这一步在代码中曾长期不存在，现按 §2.11 建成，口径以本稿为准而非旧稿。
 
 ## 附录 B · 修订记录
 
